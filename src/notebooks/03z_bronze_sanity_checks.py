@@ -5,7 +5,7 @@
 # ///
 # MAGIC %md
 # MAGIC # 03z_bronze_sanity_checks - sanity checks after Bronze ingestion (all 4 methods)
-# MAGIC Runs after every Bronze ingestion task. For each of the 26 Bronze tables it checks:
+# MAGIC For each of the 26 Bronze tables:
 # MAGIC | Check | Rule |
 # MAGIC |---|---|
 # MAGIC | row_count_matches_source | rows loaded by this method = rows in that chunk (`ops.chunk_manifest`) - reconciliation |
@@ -26,39 +26,32 @@ from vstone_framework.audit import AUDIT_COLUMNS
 from vstone_framework.bronze import RESCUED_COL, bronze_sources, contract_columns
 from vstone_framework.ops import ensure_ops_tables, write_check_results
 from vstone_framework.quality import failed, run_sanity_checks
+from vstone_framework.runtime import get_context
 from vstone_framework.uc import load_level_fields
 
-for name, default in [("catalog", "vstone"), ("landing_schema", "landing"), ("raw_volume", "raw"),
-                      ("bronze_schema", "bronze"), ("ops_schema", "ops"), ("run_id", "manual"),
-                      ("methods", "copy_into,dlt,autoloader,pyspark_xml")]:
-    dbutils.widgets.text(name, default)
-w = dbutils.widgets.get
-catalog = w("catalog")
-bronze, ops = f"{catalog}.{w('bronze_schema')}", f"{catalog}.{w('ops_schema')}"
-raw_path = f"/Volumes/{catalog}/{w('landing_schema')}/{w('raw_volume')}"
-run_id = w("run_id")
-methods = [m.strip() for m in w("methods").split(",") if m.strip()]
-ensure_ops_tables(spark, ops)
-
-level_fields = load_level_fields(f"{raw_path}/fields_per_level.json")
+ctx = get_context(dbutils, {"methods": "copy_into,dlt,autoloader,pyspark_xml"})
+methods = [m.strip() for m in ctx.param("methods").split(",") if m.strip()]
+ensure_ops_tables(spark, ctx.ops)
+level_fields = load_level_fields(f"{ctx.raw_path}/fields_per_level.json")
 manifest = {(r.level, r.chunk_no): r.row_count
-            for r in spark.table(f"{ops}.chunk_manifest").filter("status = 'SUCCESS'").collect()}
+            for r in spark.table(f"{ctx.ops}.chunk_manifest").filter("status = 'SUCCESS'").collect()}
 
 # COMMAND ----------
 
+sources = bronze_sources(methods)
 all_results = []
-for src in bronze_sources(methods):
-    table = f"{bronze}.{src.table}"
+for src in sources:
+    table = f"{ctx.bronze}.{src.table}"
     df = spark.table(table).filter(F.col("source") == src.source)
     all_results += run_sanity_checks(df, table, src.key_columns, manifest.get((src.entity, src.chunk_no)),
                                      contract_columns(src, level_fields), AUDIT_COLUMNS,
                                      rescued_column=RESCUED_COL if src.has_rescued else None)
 
-write_check_results(spark, ops, run_id, "bronze", all_results)
+write_check_results(spark, ctx.ops, ctx.run_id, "bronze", all_results)
 display(spark.createDataFrame([r.__dict__ for r in all_results]))
 
 bad = failed(all_results)
 if bad:
     raise AssertionError("Sanity checks failed:\n" + "\n".join(
         f"{r.table_name} {r.check_name}: expected {r.expected}, got {r.actual}" for r in bad))
-print(f"All {len(all_results)} sanity checks passed across {len(bronze_sources(methods))} Bronze tables.")
+print(f"All {len(all_results)} sanity checks passed across {len(sources)} Bronze tables.")

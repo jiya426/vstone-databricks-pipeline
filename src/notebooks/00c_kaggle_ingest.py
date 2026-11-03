@@ -40,14 +40,13 @@ dbutils.library.restartPython()
 import os, shutil, sys, tempfile, zipfile
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from vstone_framework.config import load_config
+from vstone_framework.runtime import get_context
 
 cfg = load_config()
 kcfg = cfg["kaggle"]
-dbutils.widgets.text("catalog", "vstone")
-dbutils.widgets.text("landing_schema", "landing")
-catalog, landing = dbutils.widgets.get("catalog"), dbutils.widgets.get("landing_schema")
-target = f"/Volumes/{catalog}/{landing}/{kcfg['target_volume']}"
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{landing}.{kcfg['target_volume']} "
+ctx = get_context(dbutils)
+target = ctx.volume_path(kcfg["target_volume"])
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {ctx.landing}.{kcfg['target_volume']} "
           "COMMENT 'Zillow files downloaded automatically with the Kaggle API'")
 
 # COMMAND ----------

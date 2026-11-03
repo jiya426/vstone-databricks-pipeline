@@ -22,7 +22,8 @@ def load_config(path: str = DEFAULT_PATH) -> Dict[str, Any]:
 
 
 def validate_config(cfg: Dict[str, Any]) -> None:
-    required = ["levels", "time_series_files", "reference_files", "chunks", "xml", "rescued_data_column"]
+    required = ["defaults", "schemas", "levels", "time_series_files", "reference_files", "chunks", "xml",
+                "rescued_data_column", "expected_source_rows"]
     missing = [k for k in required if k not in cfg]
     if missing:
         raise ValueError(f"Config is missing keys: {missing}")
@@ -30,3 +31,5 @@ def validate_config(cfg: Dict[str, Any]) -> None:
         raise ValueError("Config must define exactly chunks 1-4")
     if sorted(cfg["time_series_files"].values()) != sorted(cfg["levels"]):
         raise ValueError("time_series_files must map one file to each level")
+    if sorted(cfg["expected_source_rows"]) != sorted(cfg["levels"]):
+        raise ValueError("expected_source_rows must have one count per level")

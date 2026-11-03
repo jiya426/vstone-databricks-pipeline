@@ -27,3 +27,11 @@ def test_validate_config_rejects_unmapped_level():
     bad["levels"] = bad["levels"] + ["country"]
     with pytest.raises(ValueError, match="one file to each level"):
         validate_config(bad)
+
+
+def test_defaults_cover_every_notebook_parameter():
+    from vstone_framework.runtime import STANDARD_PARAMS
+    cfg = load_config()
+    assert set(STANDARD_PARAMS) <= set(cfg["defaults"])
+    assert sum(cfg["expected_source_rows"].values()) == 10_584_674        # profiled total
+    assert set(cfg["schemas"]) == {"landing", "bronze", "silver", "gold", "governance", "ops"}

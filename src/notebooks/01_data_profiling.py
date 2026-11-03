@@ -23,16 +23,13 @@ from pyspark.sql import functions as F
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))   # makes src/ importable
 from vstone_framework.chunking import TIME_SERIES_FILES, REFERENCE_FILES
+from vstone_framework.config import load_config
+from vstone_framework.runtime import get_context
 from vstone_framework.schema_checks import compare_columns
 
-dbutils.widgets.text("catalog", "vstone")
-dbutils.widgets.text("landing_schema", "landing")
-dbutils.widgets.text("raw_volume", "raw")
-dbutils.widgets.text("ops_schema", "ops")
-
-catalog = dbutils.widgets.get("catalog")
-ops = f"{catalog}.{dbutils.widgets.get('ops_schema')}"
-raw_path = f"/Volumes/{catalog}/{dbutils.widgets.get('landing_schema')}/{dbutils.widgets.get('raw_volume')}"
+cfg = load_config()
+ctx = get_context(dbutils)
+ops, raw_path = ctx.ops, ctx.raw_path
 profiled_at = datetime.now(timezone.utc)
 
 def read_raw_csv(file_name):
@@ -117,13 +114,13 @@ display(col_df.filter("non_numeric_cells > 0 OR negative_cells > 0").orderBy("le
 
 # COMMAND ----------
 
-ref_keys = {"CountyCrossWalk_Zillow.csv": "FIPS", "cities_crosswalk.csv": "Unique_City_ID"}
-for file_name in REFERENCE_FILES:
+for file_name, ref_name in REFERENCE_FILES.items():
     ref = read_raw_csv(file_name)
-    key = [c for c in ref.columns if c.lstrip("﻿") == ref_keys[file_name]][0]
+    key_name = cfg["reference_keys"][ref_name][0]
+    key = [c for c in ref.columns if c.lstrip("\ufeff") == key_name][0]
     r = ref.agg(F.count(F.lit(1)).alias("rows"), F.countDistinct(key).alias("distinct_keys")).first()
     nulls = {c: ref.filter(F.col(f"`{c}`").isNull()).count() for c in ref.columns}
-    print(f"{file_name}: rows={r.rows}, distinct {ref_keys[file_name]}={r.distinct_keys}, "
+    print(f"{file_name}: rows={r.rows}, distinct {key_name}={r.distinct_keys}, "
           f"header={ref.columns}, nulls={ {k: v for k, v in nulls.items() if v} }")
 
 # COMMAND ----------
@@ -184,11 +181,10 @@ display(spark.read.option("header", True).csv(f"{raw_path}/DataDictionary.csv"))
 
 # COMMAND ----------
 
-expected_rows = {"state": 13212, "metro": 211182, "county": 518791, "city": 3762566,
-                 "neighborhood": 1695038, "zip": 4383885}
+expected_rows = cfg["expected_source_rows"]
 actual = {r.level: r.row_count for r in file_df.collect()}
 assert actual == expected_rows, f"Row counts differ: {actual}"
 assert all(r.duplicate_keys == 0 and r.bad_dates == 0 for r in file_df.collect()), "Key or date issues"
 assert all(r.missing_columns is None and r.unexpected_columns is None for r in file_df.collect()), "Header mismatch"
-assert bad_nb.count() == 302, "Expected 302 malformed neighborhood rows"
+assert bad_nb.count() == cfg["expected_malformed_neighborhood_rows"], "Unexpected number of malformed neighborhood rows"
 print(f"Profiling validated: {sum(actual.values()):,} rows across 6 files.")

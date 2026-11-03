@@ -5,42 +5,26 @@
 # ///
 # MAGIC %md
 # MAGIC # 00b_verify_raw_upload
-# MAGIC Checks that all 11 archive files are in the raw Volume with the exact byte sizes
-# MAGIC of the original archive, so a truncated upload is caught immediately.
+# MAGIC Checks that all 11 archive files are in the raw Volume with the exact byte sizes recorded in
+# MAGIC `conf/vstone_config.json` (expected_raw_bytes), so a truncated upload is caught immediately.
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "vstone")
-dbutils.widgets.text("landing_schema", "landing")
-dbutils.widgets.text("raw_volume", "raw")
-raw_path = (f"/Volumes/{dbutils.widgets.get('catalog')}/"
-            f"{dbutils.widgets.get('landing_schema')}/{dbutils.widgets.get('raw_volume')}/")
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.config import load_config
+from vstone_framework.runtime import get_context
 
-expected_bytes = {
-    "City_time_series.csv": 689627012,
-    "Zip_time_series.csv": 782137407,
-    "Neighborhood_time_series.csv": 265790699,
-    "County_time_series.csv": 112778579,
-    "Metro_time_series.csv": 56232114,
-    "State_time_series.csv": 4742679,
-    "CountyCrossWalk_Zillow.csv": 232467,
-    "cities_crosswalk.csv": 1074309,
-    "DataDictionary.csv": 4668,
-    "all_available_metrics.json": 3409,
-    "fields_per_level.json": 17005,
-}
+expected_bytes = load_config()["expected_raw_bytes"]
+ctx = get_context(dbutils)
 
 # COMMAND ----------
 
-actual = {f.name: f.size for f in dbutils.fs.ls(raw_path)}
-rows, problems = [], []
-for name, size in expected_bytes.items():
-    got = actual.get(name)
-    status = "OK" if got == size else ("MISSING" if got is None else "SIZE MISMATCH")
-    rows.append((name, size, got, status))
-    if status != "OK":
-        problems.append(name)
-
+actual = {f.name: f.size for f in dbutils.fs.ls(ctx.raw_path)}
+rows = [(name, size, actual.get(name),
+         "OK" if actual.get(name) == size else ("MISSING" if name not in actual else "SIZE MISMATCH"))
+        for name, size in expected_bytes.items()]
 display(spark.createDataFrame(rows, "file STRING, expected_bytes LONG, actual_bytes LONG, status STRING"))
+problems = [r[0] for r in rows if r[3] != "OK"]
 assert not problems, f"Re-upload these files: {problems}"
-print("All 11 files present with correct sizes.")
+print(f"All {len(rows)} files present with correct sizes.")
