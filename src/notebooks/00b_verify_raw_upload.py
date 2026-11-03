@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 00b_verify_raw_upload
 # MAGIC Checks that all 11 archive files are in the raw Volume with the exact byte sizes

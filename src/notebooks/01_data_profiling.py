@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 01_data_profiling - Zillow Economics dataset profile
 # MAGIC **Purpose:** understand every file before designing the pipeline (PDF Day 1: "Dataset Profiling").

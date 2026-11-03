@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 00_setup - Vstone Unity Catalog objects
 # MAGIC Creates the catalog, one schema per layer, and the landing Volumes.
