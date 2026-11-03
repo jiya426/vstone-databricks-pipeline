@@ -1,0 +1,52 @@
+# Databricks Asset Bundle for the Vstone project.
+# All environment-specific values are variables (no hard-coding).
+bundle:
+  name: vstone-databricks-pipeline
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds every Vstone schema
+    default: vstone
+  landing_schema:
+    default: landing
+  bronze_schema:
+    default: bronze
+  silver_schema:
+    default: silver
+  gold_schema:
+    default: gold
+  governance_schema:
+    default: governance
+  ops_schema:
+    default: ops
+  raw_volume:
+    default: raw
+  chunks_volume:
+    default: chunks
+  notification_email:
+    description: Address that receives job failure emails
+    default: jjain1374@gmail.com
+  # Date cut-offs used by the Data Chunking job (chunk N = dates <= cut-off N)
+  chunk1_end_date:
+    default: "2005-12-31"
+  chunk2_end_date:
+    default: "2012-12-31"
+  chunk3_end_date:
+    default: "2015-12-31"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-247f8dcb-efec.cloud.databricks.com
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-247f8dcb-efec.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/prod
+    variables:
+      catalog: vstone_prod
