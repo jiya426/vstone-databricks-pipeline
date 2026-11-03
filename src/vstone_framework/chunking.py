@@ -31,31 +31,22 @@ class ChunkTarget:
     ingestion: str     # documentation: which Bronze method reads it
 
 
+from .config import load_config
+
+_CFG = load_config()
+
 CHUNK_TARGETS: Dict[int, ChunkTarget] = {
-    1: ChunkTarget(1, "csv_initial", "csv", "COPY INTO"),
-    2: ChunkTarget(2, "csv_incremental", "csv", "Delta Live Tables"),
-    3: ChunkTarget(3, "json", "json", "Auto Loader"),
-    4: ChunkTarget(4, "xml", "xml", "PySpark read/write"),
+    int(n): ChunkTarget(int(n), c["folder"], c["format"], c["method"]) for n, c in _CFG["chunks"].items()
 }
 
 # Source file -> short level name used in folder and table names
-TIME_SERIES_FILES: Dict[str, str] = {
-    "State_time_series.csv": "state",
-    "Metro_time_series.csv": "metro",
-    "County_time_series.csv": "county",
-    "City_time_series.csv": "city",
-    "Neighborhood_time_series.csv": "neighborhood",
-    "Zip_time_series.csv": "zip",
-}
+TIME_SERIES_FILES: Dict[str, str] = dict(_CFG["time_series_files"])
 
 # Reference files are not chunked; they travel with chunk 1 (assumption A2)
-REFERENCE_FILES: Dict[str, str] = {
-    "CountyCrossWalk_Zillow.csv": "county_crosswalk",
-    "cities_crosswalk.csv": "city_crosswalk",
-}
+REFERENCE_FILES: Dict[str, str] = dict(_CFG["reference_files"])
 
 # Metadata files are never ingested (PDF rule); used for documentation/validation
-METADATA_FILES = ("DataDictionary.csv", "all_available_metrics.json", "fields_per_level.json")
+METADATA_FILES = tuple(_CFG["metadata_files"])
 
 
 def parse_cutoffs(values: Sequence[str]) -> List[date]:
@@ -87,7 +78,8 @@ def chunk_expression(date_col: Column, cutoffs: Sequence[date]) -> Column:
 def with_chunk_no(cutoffs: Sequence[date], date_col: str = "Date") -> Callable[[DataFrame], DataFrame]:
     """Transformation for DataFrame.transform(): adds the integer column `chunk_no`."""
     def _transform(df: DataFrame) -> DataFrame:
-        parsed = F.to_date(F.col(date_col), "yyyy-MM-dd")
+        # try_to_timestamp returns NULL for malformed text even with ANSI mode on (serverless default)
+        parsed = F.try_to_timestamp(F.col(date_col), F.lit("yyyy-MM-dd")).cast("date")
         return df.withColumn(CHUNK_COL, chunk_expression(parsed, cutoffs))
     return _transform
 

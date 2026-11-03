@@ -1,5 +1,8 @@
 name: databricks-ci-cd
 
+# PR into dev/main : unit tests + bundle validation (gate)
+# push to dev      : tests -> deploy to dev -> integration run of the jobs on serverless
+# push to main     : tests -> deploy to prod
 on:
   pull_request:
     branches: [dev, main]
@@ -26,9 +29,7 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
       - name: Run unit tests
-        run: |
-          # exit code 5 = "no tests collected", allowed only until tests exist
-          pytest tests -v --junitxml=test-results.xml || [ $? -eq 5 ]
+        run: pytest tests -v --junitxml=test-results.xml
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -41,7 +42,7 @@ jobs:
         run: databricks bundle validate -t dev
 
   deploy-dev:
-    name: Deploy to dev
+    name: Deploy to dev and run integration
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
@@ -51,7 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: databricks/setup-cli@main
-      - run: databricks bundle deploy -t dev
+      - name: Deploy bundle to dev
+        run: databricks bundle deploy -t dev
+      - name: "Integration: Data Chunking job (idempotent - completed chunks are skipped)"
+        run: databricks bundle run -t dev data_chunking
+      - name: "Integration: Bronze ingestion job + sanity checks (re-run loads only new files)"
+        run: databricks bundle run -t dev bronze_ingestion
 
   deploy-prod:
     name: Deploy to prod
