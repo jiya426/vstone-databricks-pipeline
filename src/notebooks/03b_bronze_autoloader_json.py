@@ -57,6 +57,7 @@ def ingest_json(src):
     spark.sql(create_table_ddl(table, cols, column_comments(cols, dictionary), src.description, rescued=True))
     comment_table(spark, table, src.description)
     set_tags(spark, table, {**cfg["tags"], "layer": "bronze", "ingestion": "autoloader", "entity": src.entity})
+    before = spark.table(table).count()                                    # <-- NEW
 
     stream = (spark.readStream.format("cloudFiles")
               .option("cloudFiles.format", "json")
@@ -72,7 +73,8 @@ def ingest_json(src):
              .trigger(availableNow=True)
              .toTable(table))
     query.awaitTermination()
-    return sum(p.get("numInputRows", 0) for p in query.recentProgress)
+    # Row count from the table itself: streaming progress reports can contain None for empty batches
+    return spark.table(table).count() - before                             # <-- NEW (replaces the sum(...) line)
 
 results, failures = [], []
 for src in bronze_sources(["autoloader"]):
