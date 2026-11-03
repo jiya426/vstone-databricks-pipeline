@@ -1,4 +1,6 @@
+# Local / CI test dependencies (Databricks serverless provides its own runtime)
 pyspark==3.5.3
-pandas
-pyarrow
-pytest
+pandas==2.2.3
+pyarrow==17.0.0
+numpy<2
+pytest==8.3.3
