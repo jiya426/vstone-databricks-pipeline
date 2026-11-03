@@ -1,0 +1,52 @@
+# Job: Data Chunking (PDF Day 1). Splits the raw dataset into 4 chunks, then validates them.
+resources:
+  jobs:
+    data_chunking:
+      name: Data Chunking
+      description: >
+        Splits the six Zillow time-series files into 4 date-based chunks
+        (CSV initial, CSV incremental, JSON, XML), copies the crosswalks, and
+        validates the result. Safe to re-run: completed chunks are skipped.
+      max_concurrent_runs: 1
+      tags:
+        project: vstone
+        layer: landing
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: landing_schema
+          default: ${var.landing_schema}
+        - name: raw_volume
+          default: ${var.raw_volume}
+        - name: chunks_volume
+          default: ${var.chunks_volume}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: chunk1_end_date
+          default: ${var.chunk1_end_date}
+        - name: chunk2_end_date
+          default: ${var.chunk2_end_date}
+        - name: chunk3_end_date
+          default: ${var.chunk3_end_date}
+        - name: force_rechunk
+          default: "false"
+        - name: run_id
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: chunk_dataset
+          notebook_task:
+            notebook_path: ../src/notebooks/02_data_chunking.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 7200
+        - task_key: validate_chunks
+          depends_on:
+            - task_key: chunk_dataset
+          notebook_task:
+            notebook_path: ../src/notebooks/02b_validate_chunks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
