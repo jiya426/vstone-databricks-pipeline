@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 02b_validate_chunks - sanity check after Data Chunking
 # MAGIC Runs as the second task of the **Data Chunking** job. It fails the job if any check fails.

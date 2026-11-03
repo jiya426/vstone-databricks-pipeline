@@ -8,6 +8,7 @@ resources:
         (CSV initial, CSV incremental, JSON, XML), copies the crosswalks, and
         validates the result. Safe to re-run: completed chunks are skipped.
       max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
       tags:
         project: vstone
         layer: landing

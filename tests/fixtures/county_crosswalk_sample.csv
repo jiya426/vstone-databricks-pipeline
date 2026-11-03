@@ -1,0 +1,4 @@
+CountyName,StateName,StateFIPS,CountyFIPS,MetroName_Zillow,CBSAName,CountyRegionID_Zillow,MetroRegionID_Zillow,FIPS,CBSACode
+Baldwin,Alabama,01,003,"Daphne, AL","Daphne-Fairhope-Foley, AL",1525,394519,01003,19300
+Kent,Delaware,10,001,"Dover, DE","Dover, DE",199,394539,10001,20100
+Pontotoc,Oklahoma,40,123,"Ada, OK","Ada, OK",2485,394300,40123,10220

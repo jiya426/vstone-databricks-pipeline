@@ -23,8 +23,9 @@ def _result(table: str, name: str, expected, actual, ok: bool) -> CheckResult:
 
 def run_sanity_checks(df: DataFrame, table_name: str, key_columns: Sequence[str],
                       expected_rows: Optional[int], expected_columns: Sequence[str],
-                      audit_columns: Sequence[str]) -> List[CheckResult]:
-    """Row count vs source, null keys, duplicate keys, null audit values, exact column set."""
+                      audit_columns: Sequence[str], rescued_column: Optional[str] = None) -> List[CheckResult]:
+    """Row count vs source, null keys, duplicate keys, null audit values, exact column set,
+    and - for JSON/XML/DLT tables - no values captured in the rescued-data column."""
     results: List[CheckResult] = []
     stats = df.agg(
         F.count(F.lit(1)).alias("rows"),
@@ -39,7 +40,10 @@ def run_sanity_checks(df: DataFrame, table_name: str, key_columns: Sequence[str]
     results.append(_result(table_name, "no_duplicate_keys", 0, dups, dups == 0))
     results.append(_result(table_name, "audit_columns_populated", 0, stats["null_audit"] or 0,
                            (stats["null_audit"] or 0) == 0))
-    expected_set = list(expected_columns) + list(audit_columns)
+    if rescued_column:
+        rescued = df.filter(F.col(rescued_column).isNotNull()).count()
+        results.append(_result(table_name, "no_rescued_data", 0, rescued, rescued == 0))
+    expected_set = list(expected_columns) + ([rescued_column] if rescued_column else []) + list(audit_columns)
     actual = df.columns
     results.append(_result(table_name, "columns_match_contract", len(expected_set), len(actual),
                            sorted(actual) == sorted(expected_set)))

@@ -1,0 +1,61 @@
+{
+  "_comment": "Central pipeline configuration. Static definitions only; environment-specific values (catalog, email, cut-off dates) are bundle variables passed as job parameters.",
+  "project": "vstone",
+  "source_system": "zillow",
+  "kaggle": {
+    "dataset": "zillow/zecon",
+    "target_volume": "raw_kaggle",
+    "secret_scope": "vstone",
+    "username_key": "kaggle_username",
+    "token_key": "kaggle_key"
+  },
+  "volumes": {
+    "raw": "raw",
+    "chunks": "chunks",
+    "checkpoints": "checkpoints",
+    "raw_kaggle": "raw_kaggle"
+  },
+  "levels": ["state", "metro", "county", "city", "neighborhood", "zip"],
+  "time_series_files": {
+    "State_time_series.csv": "state",
+    "Metro_time_series.csv": "metro",
+    "County_time_series.csv": "county",
+    "City_time_series.csv": "city",
+    "Neighborhood_time_series.csv": "neighborhood",
+    "Zip_time_series.csv": "zip"
+  },
+  "reference_files": {
+    "CountyCrossWalk_Zillow.csv": "county_crosswalk",
+    "cities_crosswalk.csv": "city_crosswalk"
+  },
+  "metadata_files": ["DataDictionary.csv", "all_available_metrics.json", "fields_per_level.json"],
+  "expected_raw_bytes": {
+    "City_time_series.csv": 689627012,
+    "Zip_time_series.csv": 782137407,
+    "Neighborhood_time_series.csv": 265790699,
+    "County_time_series.csv": 112778579,
+    "Metro_time_series.csv": 56232114,
+    "State_time_series.csv": 4742679,
+    "CountyCrossWalk_Zillow.csv": 232467,
+    "cities_crosswalk.csv": 1074309,
+    "DataDictionary.csv": 4668,
+    "all_available_metrics.json": 3409,
+    "fields_per_level.json": 17005
+  },
+  "chunks": {
+    "1": {"folder": "csv_initial",     "format": "csv",  "method": "copy_into",  "source": "copy_into_csv",   "table_suffix": "ts_csv"},
+    "2": {"folder": "csv_incremental", "format": "csv",  "method": "dlt",        "source": "dlt_csv",         "table_suffix": "ts_csv_dlt"},
+    "3": {"folder": "json",            "format": "json", "method": "autoloader", "source": "autoloader_json", "table_suffix": "ts_json"},
+    "4": {"folder": "xml",             "format": "xml",  "method": "pyspark_xml","source": "pyspark_xml",     "table_suffix": "ts_xml"}
+  },
+  "xml": {"root_tag": "rows", "row_tag": "row"},
+  "rescued_data_column": "_rescued_data",
+  "time_series_key": ["Date", "RegionName"],
+  "reference_keys": {"county_crosswalk": ["FIPS"], "city_crosswalk": ["Unique_City_ID"]},
+  "reference_columns": {
+    "county_crosswalk": ["CountyName", "StateName", "StateFIPS", "CountyFIPS", "MetroName_Zillow", "CBSAName",
+                         "CountyRegionID_Zillow", "MetroRegionID_Zillow", "FIPS", "CBSACode"],
+    "city_crosswalk": ["Unique_City_ID", "City", "County", "State"]
+  },
+  "tags": {"project": "vstone", "source_system": "zillow"}
+}

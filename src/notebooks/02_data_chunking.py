@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 02_data_chunking - split the dataset into 4 chunks (Job: **Data Chunking**)
 # MAGIC
@@ -137,6 +141,15 @@ failures, summary = [], []
 manifest = manifest_lookup()
 
 for file_name, level in TIME_SERIES_FILES.items():
+    # Fast path: if all 4 chunks of this file are already SUCCESS and on disk, skip without reading
+    # the source at all (keeps CI-triggered re-runs cheap on the Free Edition quota).
+    prior = [manifest.get((file_name, n)) for n in CHUNK_TARGETS]
+    if all(plan_action(p.status if p else None, path_exists(chunk_output_path(chunks_root, n, level)), force) == "skip"
+           for n, p in zip(CHUNK_TARGETS, prior)):
+        for n, p in zip(CHUNK_TARGETS, prior):
+            summary.append((file_name, n, CHUNK_TARGETS[n].file_format, "skipped", p.row_count))
+        print(f"SKIP {file_name}: all chunks already written")
+        continue
     try:
         df = spark.read.option("header", True).option("inferSchema", False).csv(f"{raw_path}/{file_name}")
         assert_columns_match(level, expected_fields[file_name.split("_")[0]], df.columns)

@@ -63,7 +63,7 @@ for file_name, level in TIME_SERIES_FILES.items():
         F.countDistinct("Date").alias("months"),
         F.sum(F.col("RegionName").isNull().cast("int")).alias("null_region"),
         F.sum(F.col("Date").isNull().cast("int")).alias("null_date"),
-        F.sum(F.to_date("Date", "yyyy-MM-dd").isNull().cast("int")).alias("bad_dates"),
+        F.sum(F.try_to_timestamp(F.col("Date"), F.lit("yyyy-MM-dd")).isNull().cast("int")).alias("bad_dates"),
     ).first()
     dup_keys = df.groupBy("Date", "RegionName").count().filter("count > 1").count()
 

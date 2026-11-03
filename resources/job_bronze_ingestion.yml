@@ -1,12 +1,18 @@
-# Job: Bronze ingestion. Day 2 = COPY INTO; Day 3 adds Auto Loader, XML and DLT tasks.
+# Job: Bronze ingestion - all four PDF ingestion methods, then sanity checks.
+#   chunk 1 CSV  -> COPY INTO          (bronze_copy_into_csv)
+#   chunk 2 CSV  -> Delta Live Tables  (bronze_dlt_csv_incremental)
+#   chunk 3 JSON -> Auto Loader        (bronze_autoloader_json)
+#   chunk 4 XML  -> PySpark read/write (bronze_xml)
+# The four loads are independent and run in parallel (Free Edition allows 5 concurrent tasks).
 resources:
   jobs:
     bronze_ingestion:
       name: vstone_bronze_ingestion
       description: >
-        Loads the Zillow chunks into the Bronze layer. Day 2: CSV chunk 1 and both crosswalks
-        with COPY INTO, then sanity checks.
+        Loads the 4 Zillow chunks into Bronze with COPY INTO, DLT, Auto Loader and PySpark XML,
+        then runs reconciliation and data-quality sanity checks on all 26 Bronze tables.
       max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
       tags:
         project: vstone
         layer: bronze
@@ -35,9 +41,30 @@ resources:
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 3600
+        - task_key: bronze_dlt_csv_incremental
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_csv_dlt.id}
+            full_refresh: false
+          max_retries: 0
+          timeout_seconds: 3600
+        - task_key: bronze_autoloader_json
+          notebook_task:
+            notebook_path: ../src/notebooks/03b_bronze_autoloader_json.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
+        - task_key: bronze_xml
+          notebook_task:
+            notebook_path: ../src/notebooks/03c_bronze_xml.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
         - task_key: bronze_sanity_checks
           depends_on:
             - task_key: bronze_copy_into_csv
+            - task_key: bronze_dlt_csv_incremental
+            - task_key: bronze_autoloader_json
+            - task_key: bronze_xml
           notebook_task:
             notebook_path: ../src/notebooks/03z_bronze_sanity_checks.py
           max_retries: 0

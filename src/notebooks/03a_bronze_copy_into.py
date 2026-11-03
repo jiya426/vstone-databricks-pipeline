@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 03a_bronze_copy_into - Day 2: CSV chunk 1 + crosswalks into Bronze with COPY INTO
 # MAGIC
@@ -25,6 +29,7 @@ from vstone_framework.bronze import CROSSWALK_COLUMNS, copy_into_sources, copy_i
 from vstone_framework.metadata import column_comments, load_data_dictionary, sql_string
 from vstone_framework.ops import ensure_ops_tables, log_run
 from vstone_framework.schema_checks import assert_columns_match
+from vstone_framework.uc import comment_table, set_tags
 
 dbutils.widgets.text("catalog", "vstone")
 dbutils.widgets.text("landing_schema", "landing")
@@ -60,13 +65,6 @@ def header_of_first_csv(folder):
     with open(files[0].replace("dbfs:", ""), newline="", encoding="utf-8-sig") as fh:
         return next(csv.reader(fh)), len(files)
 
-def set_tags(table, tags):
-    pairs = ", ".join(f"{sql_string(k)} = {sql_string(v)}" for k, v in tags.items())
-    try:
-        spark.sql(f"ALTER TABLE {table} SET TAGS ({pairs})")
-    except Exception as e:                       # tags are optional metadata; never fail the load for them
-        print(f"WARN: could not set tags on {table}: {e}")
-
 # COMMAND ----------
 
 results, failures = [], []
@@ -80,8 +78,8 @@ for src in copy_into_sources():
         assert_columns_match(src.entity, cols, header)                     # 1. schema validation
 
         spark.sql(create_table_ddl(table, cols, column_comments(cols, dictionary), src.description))   # 2
-        spark.sql(f"COMMENT ON TABLE {table} IS {sql_string(src.description)}")                        # 3
-        set_tags(table, {"layer": "bronze", "source_system": "zillow", "ingestion": "copy_into",
+        comment_table(spark, table, src.description)                                                   # 3
+        set_tags(spark, table, {"layer": "bronze", "source_system": "zillow", "ingestion": "copy_into",
                          "entity": src.entity, "project": "vstone"})
 
         metrics = spark.sql(copy_into_sql(table, folder, cols, "copy_into_csv", run_id)).first().asDict()  # 4
