@@ -155,5 +155,159 @@
   "tags": {
     "project": "vstone",
     "source_system": "zillow"
+  },
+  "silver": {
+    "_comment": "Silver layer rules. region_patterns are full-match regexes validated against all 10,584,674 source rows (only the 302 corrupted Neighborhood rows fail).",
+    "time_series_suffix": "time_series",
+    "quarantine_table": "quarantine_records",
+    "column_map_table": "column_name_map",
+    "reconciliation_table": "silver_reconciliation",
+    "header_udf": "pandas",
+    "key_columns": [
+      "date",
+      "region_name"
+    ],
+    "region_patterns": {
+      "state": "^[A-Za-z]+$",
+      "metro": "^([0-9]{5}|United_States)$",
+      "county": "^[0-9]{4,5}$",
+      "city": "^[a-z0-9_]+$",
+      "neighborhood": "^[0-9]+$",
+      "zip": "^[0-9]{5}$"
+    },
+    "expected_quarantine_rows": {
+      "state": 0,
+      "metro": 0,
+      "county": 0,
+      "city": 0,
+      "neighborhood": 302,
+      "zip": 0
+    },
+    "conformed": {
+      "metric_catalog_table": "metric_catalog",
+      "long_table": "region_metric_monthly",
+      "region_table": "region_reference",
+      "features_table": "region_features_monthly",
+      "reconciliation_table": "silver_conformed_reconciliation",
+      "long_cluster_by": [
+        "level",
+        "metric_name",
+        "date_key"
+      ]
+    }
+  },
+  "business_rules": {
+    "_comment": "Day 5 business rules. Units measured on the real data: every percentage is 0-100 except InventoryTierShare (0-1), which is scaled x100.",
+    "reporting_currency": "USD",
+    "source_currency": "USD",
+    "fx_to_reporting": {
+      "USD": 1.0
+    },
+    "unit_by_family": {
+      "ZHVI": "USD",
+      "ZRI": "USD_PER_MONTH",
+      "MedianListingPrice": "USD",
+      "MedianRentalPrice": "USD_PER_MONTH",
+      "MedianSoldPrice": "USD",
+      "MedianPriceCutDollar": "USD",
+      "ZHVIPerSqft": "USD_PER_SQFT",
+      "MedianListingPricePerSqft": "USD_PER_SQFT",
+      "ZriPerSqft": "USD_PER_SQFT_PER_MONTH",
+      "MedianRentalPricePerSqft": "USD_PER_SQFT_PER_MONTH",
+      "PctOfHomesDecreasingInValues": "PERCENT",
+      "PctOfHomesIncreasingInValues": "PERCENT",
+      "PctOfHomesSellingForGain": "PERCENT",
+      "PctOfHomesSellingForLoss": "PERCENT",
+      "PctOfListingsWithPriceReductionsSeasAdj": "PERCENT",
+      "PctOfListingsWithPriceReductions": "PERCENT",
+      "MedianPctOfPriceReduction": "PERCENT",
+      "TierShare": "PERCENT",
+      "InventoryRaw": "COUNT",
+      "InventorySeasonallyAdjusted": "COUNT",
+      "SalesRaw": "COUNT",
+      "SalesSeasonallyAdjusted": "COUNT",
+      "DaysOnZillow": "DAYS",
+      "AgeOfInventory": "DAYS",
+      "PriceToRentRatio": "RATIO"
+    },
+    "scale_by_family": {
+      "TierShare": 100.0
+    },
+    "currency_units": [
+      "USD",
+      "USD_PER_MONTH",
+      "USD_PER_SQFT",
+      "USD_PER_SQFT_PER_MONTH"
+    ],
+    "decimal_places": {
+      "USD": 2,
+      "USD_PER_MONTH": 2,
+      "USD_PER_SQFT": 4,
+      "USD_PER_SQFT_PER_MONTH": 4,
+      "PERCENT": 4,
+      "COUNT": 0,
+      "DAYS": 1,
+      "RATIO": 4
+    },
+    "state_codes": {
+      "Alabama": "AL",
+      "Alaska": "AK",
+      "Arizona": "AZ",
+      "Arkansas": "AR",
+      "California": "CA",
+      "Colorado": "CO",
+      "Connecticut": "CT",
+      "Delaware": "DE",
+      "District of Columbia": "DC",
+      "Florida": "FL",
+      "Georgia": "GA",
+      "Hawaii": "HI",
+      "Idaho": "ID",
+      "Illinois": "IL",
+      "Indiana": "IN",
+      "Iowa": "IA",
+      "Kansas": "KS",
+      "Kentucky": "KY",
+      "Louisiana": "LA",
+      "Maine": "ME",
+      "Maryland": "MD",
+      "Massachusetts": "MA",
+      "Michigan": "MI",
+      "Minnesota": "MN",
+      "Mississippi": "MS",
+      "Missouri": "MO",
+      "Montana": "MT",
+      "Nebraska": "NE",
+      "Nevada": "NV",
+      "New Hampshire": "NH",
+      "New Jersey": "NJ",
+      "New Mexico": "NM",
+      "New York": "NY",
+      "North Carolina": "NC",
+      "North Dakota": "ND",
+      "Ohio": "OH",
+      "Oklahoma": "OK",
+      "Oregon": "OR",
+      "Pennsylvania": "PA",
+      "Rhode Island": "RI",
+      "South Carolina": "SC",
+      "South Dakota": "SD",
+      "Tennessee": "TN",
+      "Texas": "TX",
+      "Utah": "UT",
+      "Vermont": "VT",
+      "Virginia": "VA",
+      "Washington": "WA",
+      "West Virginia": "WV",
+      "Wisconsin": "WI",
+      "Wyoming": "WY"
+    },
+    "national_regions": {
+      "state": "UnitedStates",
+      "metro": "United_States"
+    },
+    "region_code_padding": {
+      "county": 5
+    }
   }
 }

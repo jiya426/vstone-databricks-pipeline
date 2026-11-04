@@ -26,3 +26,10 @@ def load_level_fields(path: str) -> Dict[str, list]:
     import json
     with open(path, encoding="utf-8") as fh:
         return {k.lower(): v for k, v in json.load(fh).items()}
+
+
+def table_ddl(full_table: str, columns, comment: str, cluster_by=None) -> str:
+    """CREATE TABLE IF NOT EXISTS from (name, type, comment) tuples; optional Liquid Clustering keys."""
+    body = ",\n".join(f"  `{n}` {t} COMMENT {sql_string(c)}" for n, t, c in columns)
+    cluster = f"\nCLUSTER BY ({', '.join(cluster_by)})" if cluster_by else ""
+    return f"CREATE TABLE IF NOT EXISTS {full_table} (\n{body}\n)\nUSING DELTA{cluster}\nCOMMENT {sql_string(comment)}"
