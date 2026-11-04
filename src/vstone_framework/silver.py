@@ -5,10 +5,14 @@ Pipeline per geography level (each step is a DataFrame.transform-able function, 
     union_bronze_sources   4 Bronze tables (COPY INTO, DLT, Auto Loader, XML) -> one DataFrame
     flag_quality_issues    adds `_reason` = first failing rule, else NULL
     split_quarantine       rows with a reason -> quarantine; the rest continue
+    dedupe_latest          one row per (Date, RegionName); the latest Bronze load wins
     cast_types             Date STRING -> DATE, metrics STRING -> DOUBLE
     drop_empty_rows        rows where every metric is NULL carry no information
-    dedupe_latest          one row per (Date, RegionName); the latest Bronze load wins
     standardize_headers    snake_case column names (Python / pandas UDF, see headers.py)
+
+Order matters for performance: deduplicating (a window function) AFTER 80 casts and a wide filter makes
+Spark's constraint propagation explode (it ran out of memory planning the query). Deduplicating the raw
+validated rows first needs only the key columns; casting and filtering afterwards is cheap.
 
 NULL policy ("clean nulls"):
   * NULL key (Date or RegionName)  -> quarantined (row is unusable)
@@ -51,8 +55,15 @@ def union_bronze_sources(dfs: Sequence[DataFrame], contract: Sequence[str], resc
 
 
 def _non_numeric(metric_cols: Sequence[str]):
-    checks = [F.col(f"`{c}`").isNotNull() & F.expr(f"try_cast(`{c}` AS DOUBLE)").isNull() for c in metric_cols]
-    return reduce(lambda a, b: a | b, checks) if checks else F.lit(False)
+    """TRUE when any metric value is present but not a number.
+
+    One higher-order function over an array instead of an 80-way OR chain: a long OR chain makes the Spark
+    optimiser re-order a huge expression tree (it ran out of memory planning the query in tests).
+    """
+    if not metric_cols:
+        return F.lit(False)
+    arr = ", ".join(f"`{c}`" for c in metric_cols)
+    return F.expr(f"exists(array({arr}), x -> x IS NOT NULL AND try_cast(x AS DOUBLE) IS NULL)")
 
 
 def flag_quality_issues(metric_cols: Sequence[str], region_pattern: str, rescued_col: str,

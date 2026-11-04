@@ -1,11 +1,14 @@
-# Job: Silver transform (PDF Day 4). Time series and reference data in parallel, then checks.
+# Job: Silver transform (PDF Days 4-5).
+#   Day 4: silver_time_series + silver_reference (parallel) -> silver_sanity_checks
+#   Day 5: silver_conformed (business rules) + silver_features (parallel) -> silver_conformed_checks
 resources:
   jobs:
     silver_transform:
       name: vstone_silver_transform
       description: >
         Bronze -> Silver: union of the 4 Bronze sources per level, quality rules with quarantine,
-        typing, null handling, deduplication, snake_case headers via pandas UDF, reconciliation and checks.
+        typing, null handling, deduplication, snake_case headers via pandas UDF, reconciliation and checks;
+        then business rules (units, currency normalisation, date keys, region standardisation), long table and features.
       max_concurrent_runs: 1
       performance_target: PERFORMANCE_OPTIMIZED
       tags:
@@ -51,3 +54,29 @@ resources:
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 1800
+        - task_key: silver_conformed
+          depends_on:
+            - task_key: silver_time_series
+            - task_key: silver_reference
+          notebook_task:
+            notebook_path: ../src/notebooks/05a_silver_conformed.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 7200
+        - task_key: silver_features
+          depends_on:
+            - task_key: silver_time_series
+          notebook_task:
+            notebook_path: ../src/notebooks/05b_silver_features.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
+        - task_key: silver_conformed_checks
+          depends_on:
+            - task_key: silver_conformed
+            - task_key: silver_features
+          notebook_task:
+            notebook_path: ../src/notebooks/05z_silver_conformed_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600

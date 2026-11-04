@@ -36,15 +36,16 @@ def run_silver(spark, level, duplicate_load=False):
     union = union_bronze_sources(parts, contract, "_rescued_data")
     valid, bad = split_quarantine(union.transform(
         flag_quality_issues(metrics, CFG["silver"]["region_patterns"][level], "_rescued_data")))
-    nonempty = valid.transform(cast_types(metrics)).transform(drop_empty_rows(metrics))
+    deduped = valid.transform(dedupe_latest(["Date", "RegionName"]))           # dedupe first (see silver.py)
     mapping = header_mapping(spark, contract)
-    silver = nonempty.transform(dedupe_latest(["Date", "RegionName"])).transform(finalize_silver(mapping, contract, "t"))
-    q, ne, s = bad.count(), nonempty.count(), silver.count()
-    return silver, bad, reconcile_silver(bronze_rows, q, bronze_rows - q - ne, ne - s, s), (bronze_rows, q, ne, s)
+    silver = (deduped.transform(cast_types(metrics)).transform(drop_empty_rows(metrics))
+                     .transform(finalize_silver(mapping, contract, "t")))
+    q, dd, s = bad.count(), deduped.count(), silver.count()
+    return silver, bad, reconcile_silver(bronze_rows, q, dd - s, bronze_rows - q - dd, s), (bronze_rows, q, dd, s)
 
 
 def test_neighborhood_corrupted_rows_are_quarantined_and_rest_balances(spark):
-    silver, bad, error, (b, q, ne, s) = run_silver(spark, "neighborhood")
+    silver, bad, error, (b, q, dd, s) = run_silver(spark, "neighborhood")
     assert q == 302 and set(r._reason for r in bad.select("_reason").distinct().collect()) == {"INVALID_REGION"}
     assert error is None and s == b - 302
     assert silver.filter(~F.col("region_name").rlike("^[0-9]+$")).count() == 0
@@ -60,8 +61,14 @@ def test_county_silver_is_typed_snake_case_and_unique(spark):
 
 
 def test_duplicate_load_is_removed_and_reconciled(spark):
-    silver, _, error, (b, q, ne, s) = run_silver(spark, "zip", duplicate_load=True)
-    assert error is None and ne - s == b // 2 and s == b // 2           # every row was loaded twice
+    silver, _, error, (b, q, dd, s) = run_silver(spark, "zip", duplicate_load=True)
+    assert error is None and b - q - dd == b // 2 and s == b // 2       # every row was loaded twice
+
+
+def test_full_silver_materialises_quickly(spark):
+    """Regression: materialising every column must not blow up the optimiser (dedupe-after-cast did)."""
+    silver, _, _, (_, _, _, s) = run_silver(spark, "metro")
+    assert len(silver.collect()) == s
 
 
 def test_silver_values_match_source(spark):

@@ -74,8 +74,8 @@ def build_silver(level):
         .write.mode("overwrite").option("replaceWhere", f"level = '{level}'").saveAsTable(quarantine_table))
     quarantined = spark.table(quarantine_table).filter(F.col("level") == level).count()
 
-    nonempty = valid.transform(cast_types(metrics)).transform(drop_empty_rows(metrics))
-    nonempty_rows = nonempty.count()
+    deduped = valid.transform(dedupe_latest(["Date", "RegionName"]))
+    deduped_rows = deduped.count()
 
     mapping = header_mapping(spark, contract, method=scfg["header_udf"])           # pandas UDF
     all_mappings.extend((t, o, n, scfg["header_udf"]) for t, o, n in mapping_rows(mapping, table))
@@ -85,13 +85,14 @@ def build_silver(level):
     comment_table(spark, table, description)
     set_tags(spark, table, {**cfg["tags"], "layer": "silver", "entity": level})
 
-    (nonempty.transform(dedupe_latest(["Date", "RegionName"]))
-             .transform(finalize_silver(mapping, contract, ctx.run_id))
-             .write.insertInto(table, overwrite=True))
+    (deduped.transform(cast_types(metrics))
+            .transform(drop_empty_rows(metrics))
+            .transform(finalize_silver(mapping, contract, ctx.run_id))
+            .write.insertInto(table, overwrite=True))
     silver_rows = spark.table(table).count()
 
-    empty_dropped = bronze_rows - quarantined - nonempty_rows
-    duplicates = nonempty_rows - silver_rows
+    duplicates = bronze_rows - quarantined - deduped_rows
+    empty_dropped = deduped_rows - silver_rows
     error = reconcile_silver(bronze_rows, quarantined, empty_dropped, duplicates, silver_rows)
     spark.createDataFrame([(ctx.run_id, level, bronze_rows, quarantined, empty_dropped, duplicates, silver_rows,
                             error is None, error)],

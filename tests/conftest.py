@@ -16,6 +16,7 @@ def spark():
     # Apache Arrow (pandas UDFs) needs this on Java 17+; Databricks sets it for you
     java_opts = "--add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED -Dio.netty.tryReflectionSetAccessible=true"
     session = (SparkSession.builder.master("local[1]").appName("vstone-unit-tests")
+               .config("spark.driver.memory", "3g")          # Databricks drivers have far more; local default is 1g
                .config("spark.driver.extraJavaOptions", java_opts)
                .config("spark.executor.extraJavaOptions", java_opts)
                .config("spark.sql.shuffle.partitions", "1")
