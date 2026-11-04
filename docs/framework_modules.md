@@ -18,6 +18,9 @@ Logic lives in `src/vstone_framework/` (unit-tested in `tests/`); static definit
 | `metadata.py` | Column comments generated from `DataDictionary.csv` | all loaders | `test_metadata.py` |
 | `quality.py` | Sanity checks: reconciliation, null keys, duplicates, audit, rescued data, column contract | 03z | `test_quality.py` |
 | `ops.py` | `ops.pipeline_run_log`, `ops.sanity_check_results` | all loaders | (via job runs) |
+| `headers.py` | snake_case header rule as Python function, **Python UDF** and **pandas UDF**; validated mapping | 04a, 04b | `test_headers.py` |
+| `silver.py` | Silver steps: union Bronze sources, quality rules + quarantine, typing, empty-row removal, dedupe, finalise, reference cleaning, reconciliation | 04a, 04b, 04z | `test_silver.py` |
 | `uc.py` | Unity Catalog tags/comments, level field contract | all loaders | (via job runs) |
 
-Component-integration tests on real-data fixtures: `tests/integration/test_bronze_on_real_sample.py`.
+Component-integration tests on real-data fixtures: `tests/integration/test_bronze_on_real_sample.py`,
+`tests/integration/test_silver_on_real_sample.py`. UDF details: `docs/udf_header_standardization.md`.

@@ -155,5 +155,33 @@
   "tags": {
     "project": "vstone",
     "source_system": "zillow"
+  },
+  "silver": {
+    "_comment": "Silver layer rules. region_patterns are full-match regexes validated against all 10,584,674 source rows (only the 302 corrupted Neighborhood rows fail).",
+    "time_series_suffix": "time_series",
+    "quarantine_table": "quarantine_records",
+    "column_map_table": "column_name_map",
+    "reconciliation_table": "silver_reconciliation",
+    "header_udf": "pandas",
+    "key_columns": [
+      "date",
+      "region_name"
+    ],
+    "region_patterns": {
+      "state": "^[A-Za-z]+$",
+      "metro": "^([0-9]{5}|United_States)$",
+      "county": "^[0-9]{4,5}$",
+      "city": "^[a-z0-9_]+$",
+      "neighborhood": "^[0-9]+$",
+      "zip": "^[0-9]{5}$"
+    },
+    "expected_quarantine_rows": {
+      "state": 0,
+      "metro": 0,
+      "county": 0,
+      "city": 0,
+      "neighborhood": 302,
+      "zip": 0
+    }
   }
 }
