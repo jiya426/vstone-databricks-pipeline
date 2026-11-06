@@ -102,11 +102,14 @@ def test_job_and_task_parameters_come_from_bundle_variables():
                 assert str(value).startswith("${var."), (job, task["task_key"], name, value)
 
 
-def test_dlt_pipeline_reads_only_configured_settings():
-    code = open(os.path.join(ROOT, "src", "pipelines", "bronze_csv_dlt.py"), encoding="utf-8").read()
-    read = set(re.findall(r'spark\.conf\.get\(\s*"(vstone\.[a-z_]+)"', code))
-    configured = set(PIPELINES["bronze_csv_dlt"]["configuration"])
-    assert read and read - configured == set(), sorted(read - configured)
+@pytest.mark.parametrize("pipeline", sorted(PIPELINES))
+def test_dlt_pipeline_reads_only_configured_settings(pipeline):
+    for lib in PIPELINES[pipeline]["libraries"]:
+        path = os.path.normpath(os.path.join(ROOT, "resources", lib["file"]["path"]))
+        code = open(path, encoding="utf-8").read()
+        read = set(re.findall(r'spark\.conf\.get\(\s*"(vstone\.[a-z_]+)"', code))
+        configured = set(PIPELINES[pipeline]["configuration"])
+        assert read and read - configured == set(), (pipeline, sorted(read - configured))
 
 
 def test_every_notebook_ends_with_what_it_achieved():

@@ -28,6 +28,8 @@ conf/vstone_config.json  ->  databricks.yml variables  ->  job parameters   (eve
 | vstone_bronze_ingestion | catalog, landing_schema, bronze_schema, ops_schema, raw_volume, chunks_volume, env, run_id | copy_into: `chunk_no`=1, `include_reference`; autoloader: `chunk_no`=3; xml: `chunk_no`=4; sanity checks: `chunk_nos`, `include_reference` |
 | vstone_bronze_csv_dlt (pipeline) | configuration: vstone.catalog, landing_schema, raw_volume, chunks_volume, `vstone.chunk_no`=2, env, framework_path | - |
 | vstone_silver_transform | catalog, landing_schema, raw_volume, bronze_schema, silver_schema, ops_schema, env, run_id | silver_time_series: `levels`; silver_features: `demo_region` |
+| vstone_gold | catalog, silver_schema, gold_schema, governance_schema, ops_schema, env, run_id | - |
+| vstone_gold_dlt (pipeline) | configuration: vstone.catalog, silver_schema, gold_schema, env, framework_path | - |
 
 `env` = `${bundle.target}` (dev/prod), `run_id` = `{{job.run_id}}`; every other value is a `${var.*}` bundle variable.
 
@@ -41,7 +43,7 @@ Jobs and pipelines are never started with "Run now" in the Databricks UI:
 | Event | GitHub Actions does |
 |---|---|
 | Pull request into dev/main | unit + integration tests on real-data samples, `bundle validate` |
-| Push (merge) to dev | tests -> `bundle deploy -t dev` -> `bundle run` Data Chunking -> Bronze ingestion -> Silver transform |
+| Push (merge) to dev | tests -> `bundle deploy -t dev` -> `bundle run` Data Chunking -> Bronze ingestion -> Silver transform -> Gold |
 | Push (merge) to main | tests -> `bundle deploy -t prod` |
 | Actions -> databricks-ci-cd -> **Run workflow** | tests -> deploy to dev -> run the job picked in the form (all / one job / none) |
 

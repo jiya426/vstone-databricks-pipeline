@@ -25,6 +25,8 @@ Logic lives in `src/vstone_framework/` (unit-tested in `tests/`); static definit
 | `features.py` | Silver features with gap-safe lags | 05b | `test_features.py` |
 | `conformed_schema.py` | Column names, types and comments of the Day 5 tables | 05a, 05b | (via job runs) |
 | `uc.py` | Unity Catalog tags/comments, level field contract | all loaders | (via job runs) |
+| `gold.py` | Gold transformations: dimension snapshots, current rows of SCD2 tables, fact, top-10 / market trend / state sales aggregates, glossary rows, Gold checks | Gold DLT, 06b, 06z | `test_gold.py`, `test_gold_on_real_sample.py` |
+| `gold_schema.py` | Gold columns, comments, PRIMARY/FOREIGN KEYs, DLT schema strings, generated ER diagram | Gold DLT, 06z, docs | `test_gold.py` |
 
 Component-integration tests on real-data fixtures: `tests/integration/test_bronze_on_real_sample.py`,
 `tests/integration/test_silver_on_real_sample.py`, `tests/integration/test_conformed_on_real_sample.py`.

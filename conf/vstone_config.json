@@ -390,5 +390,60 @@
     "checkpoint_folders": [
       "autoloader_json"
     ]
+  },
+  "gold": {
+    "_comment": "Gold star schema built by the Lakeflow (DLT) pipeline vstone_gold_dlt. SCD2 dimensions keep history (AUTO CDC from snapshot); *_current tables hold one row per key and carry the PRIMARY KEYs the fact's FOREIGN KEYs reference.",
+    "sources": {
+      "long": "region_metric_monthly",
+      "region": "region_reference",
+      "metric": "metric_catalog",
+      "features": "region_features_monthly"
+    },
+    "tables": {
+      "dim_date": "dim_date",
+      "dim_region": "dim_region",
+      "dim_metric": "dim_metric",
+      "dim_date_current": "dim_date_current",
+      "dim_region_current": "dim_region_current",
+      "dim_metric_current": "dim_metric_current",
+      "fact": "fact_housing_metric_monthly",
+      "agg_top_regions": "agg_top10_regions_by_home_value",
+      "agg_market_trend": "agg_monthly_market_trend",
+      "agg_state_sales": "agg_state_sales_summary"
+    },
+    "glossary_table": "business_glossary",
+    "declare_constraints": true,
+    "fact_cluster_by": [
+      "metric_key",
+      "region_key",
+      "date_key"
+    ],
+    "home_value_metric": "zhvi_all_homes",
+    "top_n": 10,
+    "top_levels": [
+      "state",
+      "metro",
+      "county",
+      "city",
+      "zip"
+    ],
+    "trend_levels": [
+      "state"
+    ],
+    "sales_metrics": {
+      "sales_count": "sale_counts",
+      "sale_price": "sale_prices",
+      "home_value": "zhvi_all_homes",
+      "listing_price": "median_listing_price_all_homes"
+    },
+    "sales_level": "state",
+    "level_definitions": {
+      "state": "US state (plus the national United States series)",
+      "metro": "Metropolitan statistical area (CBSA)",
+      "county": "US county, identified by its 5-digit FIPS code",
+      "city": "City, identified by Zillow's unique city id",
+      "neighborhood": "Neighborhood, identified by Zillow's region id",
+      "zip": "5-digit ZIP code"
+    }
   }
 }
