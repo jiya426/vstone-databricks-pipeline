@@ -14,6 +14,28 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from pyspark.sql import Window, functions as F
@@ -24,7 +46,6 @@ from vstone_framework.runtime import get_context
 
 cfg = load_config()
 rules, ccfg = cfg["business_rules"], cfg["silver"]["conformed"]
-ctx = get_context(dbutils)
 ensure_ops_tables(spark, ctx.ops)
 T = {k: f"{ctx.silver}.{ccfg[k]}" for k in ("metric_catalog_table", "long_table", "region_table", "features_table")}
 results = []
@@ -102,3 +123,10 @@ if bad:
     raise AssertionError("Conformed checks failed:\n" + "\n".join(
         f"{r.table_name} {r.check_name}: expected {r.expected}, got {r.actual}" for r in bad))
 print(f"All {len(results)} conformed Silver checks passed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Validated the business-rule outputs: reconciliation of long vs wide tables, units, value ranges and feature sanity.
+# MAGIC - Stored the results in ops.sanity_check_results; any failure stops the job and sends the failure email.

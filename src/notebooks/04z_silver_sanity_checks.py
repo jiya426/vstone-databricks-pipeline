@@ -16,6 +16,31 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("bronze_schema", d["bronze_schema"], "Bronze schema")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from pyspark.sql import Window, functions as F
@@ -30,9 +55,8 @@ from vstone_framework.silver import REFERENCE_RULES
 from vstone_framework.uc import load_level_fields
 
 cfg, scfg = load_config(), load_config()["silver"]
-ctx = get_context(dbutils)
 ensure_ops_tables(spark, ctx.ops)
-level_fields = load_level_fields(f"{ctx.raw_path}/fields_per_level.json")
+level_fields = load_level_fields(ctx.metadata_path("fields_per_level"))
 latest = Window.partitionBy("level").orderBy(F.col("checked_at").desc())
 recon = {r.level: r for r in spark.table(f"{ctx.ops}.{scfg['reconciliation_table']}")
          .withColumn("_rn", F.row_number().over(latest)).filter("_rn = 1").collect()}
@@ -65,3 +89,10 @@ if bad:
     raise AssertionError("Silver checks failed:\n" + "\n".join(
         f"{x.table_name} {x.check_name}: expected {x.expected}, got {x.actual}" for x in bad))
 print(f"All {len(results)} Silver checks passed across {len(cfg['levels']) + len(REFERENCE_RULES)} tables.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Checked every Silver table: row counts match the reconciliation, keys are complete and unique, audit columns filled, columns match.
+# MAGIC - Confirmed the quarantine holds exactly the expected rows (302 neighborhood rows) and stored all results in ops.sanity_check_results.

@@ -17,6 +17,30 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from functools import reduce
@@ -34,10 +58,9 @@ from vstone_framework.uc import comment_table, load_level_fields, set_tags, tabl
 
 cfg = load_config()
 rules, scfg, ccfg = cfg["business_rules"], cfg["silver"], cfg["silver"]["conformed"]
-ctx = get_context(dbutils)
 ensure_ops_tables(spark, ctx.ops)
-level_fields = load_level_fields(f"{ctx.raw_path}/fields_per_level.json")
-dictionary = load_data_dictionary(f"{ctx.raw_path}/DataDictionary.csv")
+level_fields = load_level_fields(ctx.metadata_path("fields_per_level"))
+dictionary = load_data_dictionary(ctx.metadata_path("data_dictionary"))
 wide = lambda level: f"{ctx.silver}.{level}_{scfg['time_series_suffix']}"
 catalog_table = f"{ctx.silver}.{ccfg['metric_catalog_table']}"
 long_table = f"{ctx.silver}.{ccfg['long_table']}"
@@ -116,4 +139,11 @@ def build_long(level):
 results = run_per_table(cfg["levels"], lambda l: f"{long_table} [{l}]", build_long,
                         run_log_logger(spark, ctx.ops, ctx.run_id, "silver", "silver_conformed"))
 display(spark.createDataFrame(results_rows(results), RESULTS_SCHEMA))
-raise_if_failed(results, "Silver conformed", f"{ctx.ops}.pipeline_run_log")
+raise_if_failed(results, "Silver conformed", ctx.ops_table("run_log"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Applied the business rules: units per metric family, currency normalised to USD DECIMAL, date keys, standardised region codes.
+# MAGIC - Built the metric catalog, the region reference and the long table region_metric_monthly (Liquid Clustering).

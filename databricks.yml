@@ -36,6 +36,30 @@ variables:
     default: "2012-12-31"
   chunk3_end_date:
     default: "2015-12-31"
+  force_rechunk:
+    description: "true = overwrite the 4 landed files on purpose (Bronze must then be reset)"
+    default: "false"
+  # Task parameters: which chunk file each Bronze ingestion task loads (see conf/vstone_config.json -> chunks)
+  copy_into_chunk_no:
+    default: "1"
+  dlt_chunk_no:
+    default: "2"
+  autoloader_chunk_no:
+    default: "3"
+  xml_chunk_no:
+    default: "4"
+  bronze_check_chunk_nos:
+    description: Chunks whose Bronze tables the sanity checks cover
+    default: "1,2,3,4"
+  include_reference:
+    description: Load / check the 2 crosswalk tables together with chunk 1
+    default: "true"
+  silver_levels:
+    description: Geography levels the Silver job builds ("all" or a comma list)
+    default: all
+  demo_region:
+    description: State used by the feature preview and the time-travel demo
+    default: California
 
 targets:
   dev:

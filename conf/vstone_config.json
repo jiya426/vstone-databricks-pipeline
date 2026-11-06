@@ -1,5 +1,5 @@
 {
-  "_comment": "Central pipeline configuration. Static definitions only; environment-specific values (catalog, email, cut-off dates) are bundle variables passed as job parameters.",
+  "_comment": "Central pipeline configuration. Static definitions only. Environment values (catalog, schemas, email, cut-off dates) are bundle variables passed to notebooks as job parameters; task-specific values (chunk_no, levels) are task parameters. The 'defaults' block is used only when a notebook runs interactively.",
   "project": "vstone",
   "source_system": "zillow",
   "defaults": {
@@ -16,7 +16,15 @@
     "run_id": "manual",
     "chunk1_end_date": "2005-12-31",
     "chunk2_end_date": "2012-12-31",
-    "chunk3_end_date": "2015-12-31"
+    "chunk3_end_date": "2015-12-31",
+    "env": "dev",
+    "chunk_no": "1",
+    "chunk_nos": "1,2,3,4",
+    "include_reference": "true",
+    "levels": "all",
+    "force_rechunk": "false",
+    "demo_region": "California",
+    "demo_date": "2017-12-31"
   },
   "schemas": {
     "landing": "Landing zone: Volumes holding raw Zillow files, generated chunks and checkpoints",
@@ -62,6 +70,11 @@
     "all_available_metrics.json",
     "fields_per_level.json"
   ],
+  "metadata": {
+    "data_dictionary": "DataDictionary.csv",
+    "fields_per_level": "fields_per_level.json",
+    "available_metrics": "all_available_metrics.json"
+  },
   "expected_raw_bytes": {
     "City_time_series.csv": 689627012,
     "Zip_time_series.csv": 782137407,
@@ -86,35 +99,38 @@
   "expected_malformed_neighborhood_rows": 302,
   "chunks": {
     "1": {
-      "folder": "csv_initial",
+      "folder": "chunk1_csv",
+      "file_name": "zillow_time_series_chunk1.csv",
       "format": "csv",
       "method": "copy_into",
       "source": "copy_into_csv",
-      "table_suffix": "ts_csv"
+      "table": "zillow_ts_chunk1_csv"
     },
     "2": {
-      "folder": "csv_incremental",
+      "folder": "chunk2_csv",
+      "file_name": "zillow_time_series_chunk2.csv",
       "format": "csv",
       "method": "dlt",
       "source": "dlt_csv",
-      "table_suffix": "ts_csv_dlt"
+      "table": "zillow_ts_chunk2_csv_dlt"
     },
     "3": {
-      "folder": "json",
+      "folder": "chunk3_json",
+      "file_name": "zillow_time_series_chunk3.json",
       "format": "json",
       "method": "autoloader",
       "source": "autoloader_json",
-      "table_suffix": "ts_json"
+      "table": "zillow_ts_chunk3_json"
     },
     "4": {
-      "folder": "xml",
+      "folder": "chunk4_xml",
+      "file_name": "zillow_time_series_chunk4.xml",
       "format": "xml",
       "method": "pyspark_xml",
       "source": "pyspark_xml",
-      "table_suffix": "ts_xml"
+      "table": "zillow_ts_chunk4_xml"
     }
   },
-  "chunk_rows_per_file": 250000,
   "xml": {
     "root_tag": "rows",
     "row_tag": "row"
@@ -122,7 +138,8 @@
   "rescued_data_column": "_rescued_data",
   "time_series_key": [
     "Date",
-    "RegionName"
+    "RegionName",
+    "RegionLevel"
   ],
   "reference_keys": {
     "county_crosswalk": [
@@ -194,6 +211,29 @@
         "metric_name",
         "date_key"
       ]
+    },
+    "reference_rules": {
+      "_comment": "Crosswalk cleaning rules (standardised names): zero-padding restores codes that lost leading zeros",
+      "county_crosswalk": {
+        "key": [
+          "fips"
+        ],
+        "pad": {
+          "fips": 5,
+          "state_fips": 2,
+          "county_fips": 3
+        },
+        "upper": []
+      },
+      "city_crosswalk": {
+        "key": [
+          "unique_city_id"
+        ],
+        "pad": {},
+        "upper": [
+          "state"
+        ]
+      }
     }
   },
   "business_rules": {
@@ -309,5 +349,46 @@
     "region_code_padding": {
       "county": 5
     }
+  },
+  "ops_tables": {
+    "run_log": "pipeline_run_log",
+    "sanity_checks": "sanity_check_results",
+    "chunk_manifest": "chunk_manifest",
+    "profile_file_summary": "profile_file_summary",
+    "profile_column_stats": "profile_column_stats",
+    "profile_dq_findings": "profile_dq_findings"
+  },
+  "combined": {
+    "_comment": "Data Chunking combines the 6 time-series files into ONE dataset (union by column name, missing metrics NULL) and adds the level column, then splits it by date into exactly 4 files.",
+    "entity": "time_series",
+    "level_column": "RegionLevel",
+    "staging_folder": "_staging"
+  },
+  "reference_load": {
+    "_comment": "Crosswalks are not chunked: COPY INTO loads them straight from the raw Volume.",
+    "method": "copy_into",
+    "source": "copy_into_csv"
+  },
+  "expected_reference_rows": {
+    "county_crosswalk": 3144,
+    "city_crosswalk": 25341
+  },
+  "legacy_layout": {
+    "_comment": "Objects of the first design (each file split into 4 chunks = 24 chunk folders, 24 Bronze tables). Removed once by notebook 00d_cleanup_old_layout.",
+    "chunk_folders": [
+      "csv_initial",
+      "csv_incremental",
+      "json",
+      "xml"
+    ],
+    "bronze_table_suffixes": [
+      "ts_csv",
+      "ts_csv_dlt",
+      "ts_json",
+      "ts_xml"
+    ],
+    "checkpoint_folders": [
+      "autoloader_json"
+    ]
   }
 }

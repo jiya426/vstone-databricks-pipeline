@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -23,9 +23,11 @@ def _result(table: str, name: str, expected, actual, ok: bool) -> CheckResult:
 
 def run_sanity_checks(df: DataFrame, table_name: str, key_columns: Sequence[str],
                       expected_rows: Optional[int], expected_columns: Sequence[str],
-                      audit_columns: Sequence[str], rescued_column: Optional[str] = None) -> List[CheckResult]:
+                      audit_columns: Sequence[str], rescued_column: Optional[str] = None,
+                      allowed_values: Optional[Dict[str, Sequence[str]]] = None) -> List[CheckResult]:
     """Row count vs source, null keys, duplicate keys, null audit values, exact column set,
-    and - for JSON/XML/DLT tables - no values captured in the rescued-data column."""
+    for JSON/XML/DLT tables no values captured in the rescued-data column, and optionally that a
+    column only holds allowed values (e.g. RegionLevel in the 6 configured levels)."""
     results: List[CheckResult] = []
     stats = df.agg(
         F.count(F.lit(1)).alias("rows"),
@@ -43,6 +45,9 @@ def run_sanity_checks(df: DataFrame, table_name: str, key_columns: Sequence[str]
     if rescued_column:
         rescued = df.filter(F.col(rescued_column).isNotNull()).count()
         results.append(_result(table_name, "no_rescued_data", 0, rescued, rescued == 0))
+    for col, allowed in (allowed_values or {}).items():
+        bad = df.filter(~F.col(col).isin(list(allowed)) | F.col(col).isNull()).count()
+        results.append(_result(table_name, f"{col}_in_allowed_values", 0, bad, bad == 0))
     expected_set = list(expected_columns) + ([rescued_column] if rescued_column else []) + list(audit_columns)
     actual = df.columns
     results.append(_result(table_name, "columns_match_contract", len(expected_set), len(actual),

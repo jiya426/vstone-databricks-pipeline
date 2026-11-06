@@ -26,7 +26,7 @@ METRIC_CATALOG = [
     ("decimal_places", "INT", "Precision the normalised value is rounded to"),
     ("is_seasonally_adjusted", "BOOLEAN", "True when the series is seasonally adjusted or smoothed"),
     ("is_msa_level", "BOOLEAN", "True for metro-level (MSA) sale series"),
-    ("definition", "STRING", "Business definition from DataDictionary.csv")]
+    ("definition", "STRING", "Business definition from the Zillow data dictionary")]
 
 LONG = REGION_KEYS + DATE_ATTRS + [
     ("metric_name", "STRING", "Standardised metric name (joins to silver.metric_catalog)"),

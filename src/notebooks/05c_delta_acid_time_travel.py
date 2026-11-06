@@ -22,6 +22,32 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+# Task parameters: which region / month the demo changes and checks
+dbutils.widgets.text("demo_region", d["demo_region"], "Demo region (state)")
+dbutils.widgets.text("demo_date", d["demo_date"], "Demo month-end date")
+
+ctx = get_context(dbutils, ["demo_region", "demo_date"])
+demo_region, demo_date = ctx.param("demo_region"), ctx.param("demo_date")
+
+# COMMAND ----------
+
 import os, sys, time
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from datetime import datetime, timezone
@@ -30,7 +56,6 @@ from vstone_framework.config import load_config
 from vstone_framework.runtime import get_context
 
 cfg = load_config()
-ctx = get_context(dbutils)
 source = f"{ctx.silver}.state_{cfg['silver']['time_series_suffix']}"
 demo = f"{ctx.ops}.time_travel_demo"
 evidence = f"{ctx.ops}.time_travel_evidence"
@@ -48,7 +73,7 @@ def latest_version(table):
 
 def ca_value(table_or_df, version=None):
     q = spark.read.option("versionAsOf", version).table(table_or_df) if version is not None else spark.table(table_or_df)
-    return q.filter("region_name = 'California' AND date = DATE'2017-12-31'").first().zhvi_all_homes
+    return q.filter(f"region_name = '{demo_region}' AND date = DATE'{demo_date}'").first().zhvi_all_homes
 
 # COMMAND ----------
 
@@ -73,9 +98,9 @@ record(2, "versions", "DEEP CLONE silver.state_time_series", v_clone, rows0, val
 ts_before_changes = spark.sql(f"DESCRIBE HISTORY {demo} LIMIT 1").first().timestamp
 time.sleep(2)  # make TIMESTAMP AS OF unambiguous
 
-spark.sql(f"UPDATE {demo} SET zhvi_all_homes = zhvi_all_homes * 10 WHERE region_name = 'California'")
+spark.sql(f"UPDATE {demo} SET zhvi_all_homes = zhvi_all_homes * 10 WHERE region_name = '{demo_region}'")
 v_update = latest_version(demo)
-record(2, "versions", "UPDATE: California values wrongly x10", v_update, spark.table(demo).count(), ca_value(demo))
+record(2, "versions", f"UPDATE: {demo_region} values wrongly x10", v_update, spark.table(demo).count(), ca_value(demo))
 
 spark.sql(f"DELETE FROM {demo} WHERE region_name = 'Texas'")
 v_delete = latest_version(demo)
@@ -172,3 +197,10 @@ spark.createDataFrame(log, "run_id STRING, step INT, property STRING, action STR
                            "value DOUBLE, result STRING, recorded_at TIMESTAMP").write.mode("append").saveAsTable(evidence)
 display(spark.table(evidence).filter(F.col("run_id") == ctx.run_id).orderBy("step", "recorded_at"))
 print("All ACID and time-travel checks passed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Demonstrated Delta ACID and time travel: DEEP CLONE, update, delete, DESCRIBE HISTORY, VERSION AS OF, RESTORE.
+# MAGIC - Showed atomicity (a failed write leaves no new version) and consistency (a CHECK constraint rejects bad data).

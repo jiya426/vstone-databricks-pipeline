@@ -185,11 +185,13 @@ def reconcile_silver(bronze_rows: int, quarantined: int, empty_dropped: int, dup
 
 
 # ---------------------------------------------------------------- reference (crosswalk) data
-REFERENCE_RULES = {
-    # standardised names; zero-padding restores codes that lost leading zeros
-    "county_crosswalk": {"key": ["fips"], "pad": {"fips": 5, "state_fips": 2, "county_fips": 3}, "upper": []},
-    "city_crosswalk": {"key": ["unique_city_id"], "pad": {}, "upper": ["state"]},
-}
+def _reference_rules():
+    from .config import load_config
+    return {k: v for k, v in load_config()["silver"]["reference_rules"].items() if not k.startswith("_")}
+
+
+# Crosswalk cleaning rules from conf/vstone_config.json -> silver.reference_rules
+REFERENCE_RULES = _reference_rules()
 
 
 def clean_reference(mapping: Dict[str, str], rules: Dict, batch_id: str):

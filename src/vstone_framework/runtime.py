@@ -1,20 +1,38 @@
-"""Notebook runtime context: one call replaces the widget/path boilerplate in every notebook.
+"""Notebook runtime context: turns widget values (job + task parameters) into names and paths.
 
-    ctx = get_context(dbutils)                      # standard parameters
-    ctx = get_context(dbutils, {"force_rechunk": "false"})   # plus notebook-specific ones
+Code parameterization, end to end:
 
-Values come from job parameters (bundle variables) when run as a job, otherwise from the
-interactive defaults in conf/vstone_config.json -> "defaults".
+    conf/vstone_config.json  ->  databricks.yml variables  ->  job parameters (all tasks)
+                                                           ->  task parameters (one task, e.g. chunk_no)
+                             ->  widgets declared at the top of every notebook  ->  get_context()
+
+Every notebook declares its widgets explicitly (the "Parameters" cell), with defaults taken from
+conf/vstone_config.json -> "defaults". When the notebook runs as a job task, the job and task
+parameters override those defaults. `get_context` then only READS the widgets.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from .config import load_config
 
+# Job parameters every job passes (one per bundle variable used for names and paths)
 STANDARD_PARAMS = ["catalog", "landing_schema", "bronze_schema", "silver_schema", "gold_schema",
-                   "governance_schema", "ops_schema", "raw_volume", "chunks_volume", "run_id"]
+                   "governance_schema", "ops_schema", "raw_volume", "chunks_volume", "env", "run_id"]
+
+
+def widget_defaults() -> Dict[str, str]:
+    """Default value of every widget, from the config file (used only for interactive runs)."""
+    return {k: str(v) for k, v in load_config()["defaults"].items() if not k.startswith("_")}
+
+
+def declare_widgets(dbutils, names: Iterable[str]) -> None:
+    """Declare text widgets with config defaults. Notebooks call dbutils.widgets.text directly so the
+    parameters are visible in the notebook; this helper exists for the DLT-free test harness."""
+    defaults = widget_defaults()
+    for name in names:
+        dbutils.widgets.text(name, defaults[name])
 
 
 @dataclass(frozen=True)
@@ -28,8 +46,9 @@ class Context:
     ops_schema: str
     raw_volume: str
     chunks_volume: str
+    env: str
     run_id: str
-    params: Dict[str, str] = field(default_factory=dict)   # notebook-specific parameters
+    params: Dict[str, str] = field(default_factory=dict)   # task parameters of this notebook
 
     # ---- fully qualified schema names ----
     def fq(self, schema: str) -> str:
@@ -48,6 +67,10 @@ class Context:
     @property
     def ops(self) -> str: return self.fq(self.ops_schema)
 
+    def ops_table(self, key: str) -> str:
+        """Fully qualified ops table from config, e.g. ops_table('run_log') -> vstone.ops.pipeline_run_log"""
+        return f"{self.ops}.{load_config()['ops_tables'][key]}"
+
     # ---- Volume paths ----
     def volume_path(self, volume: str) -> str:
         return f"/Volumes/{self.catalog}/{self.landing_schema}/{volume}"
@@ -59,17 +82,46 @@ class Context:
     @property
     def checkpoints_root(self) -> str: return self.volume_path(load_config()["volumes"]["checkpoints"])
 
+    def metadata_path(self, key: str) -> str:
+        """Path of a metadata file in the raw Volume, e.g. metadata_path('fields_per_level')."""
+        return f"{self.raw_path}/{load_config()['metadata'][key]}"
+
     def param(self, name: str) -> str:
         return self.params[name]
 
+    def int_param(self, name: str) -> int:
+        return int(self.params[name])
 
-def get_context(dbutils, extra: Optional[Dict[str, str]] = None) -> Context:
-    """Declare the standard widgets (+ `extra` ones) and return their values as a Context."""
-    defaults = load_config()["defaults"]
-    for name in STANDARD_PARAMS:
-        dbutils.widgets.text(name, str(defaults[name]))
-    for name, default in (extra or {}).items():
-        dbutils.widgets.text(name, str(defaults.get(name, default)))
-    get = dbutils.widgets.get
-    return Context(**{name: get(name) for name in STANDARD_PARAMS},
-                   params={name: get(name) for name in (extra or {})})
+    def list_param(self, name: str, all_values: Optional[Iterable[str]] = None) -> list:
+        """'a,b' -> ['a', 'b']; 'all' -> all_values (e.g. every level from config)."""
+        raw = self.params[name].strip()
+        if raw.lower() == "all":
+            if all_values is None:
+                raise ValueError(f"Parameter '{name}' = 'all' needs a list of allowed values")
+            return list(all_values)
+        values = [v.strip() for v in raw.split(",") if v.strip()]
+        if all_values is not None:
+            unknown = sorted(set(values) - set(all_values))
+            if unknown:
+                raise ValueError(f"Parameter '{name}' has unknown values {unknown}; allowed: {list(all_values)}")
+        return values
+
+    def bool_param(self, name: str) -> bool:
+        return self.params[name].strip().lower() == "true"
+
+
+def _read(dbutils, name: str, default: str) -> str:
+    """Widget value; falls back to the config default when the widget is missing or empty."""
+    try:
+        value = dbutils.widgets.get(name)
+    except Exception:  # noqa: BLE001 - widget not declared (interactive run of a partial notebook)
+        value = None
+    return default if value in (None, "") else value
+
+
+def get_context(dbutils, task_params: Optional[Iterable[str]] = None) -> Context:
+    """Read the job parameters (+ the named task parameters) from the widgets."""
+    defaults = widget_defaults()
+    names = list(task_params or [])
+    return Context(**{name: _read(dbutils, name, defaults[name]) for name in STANDARD_PARAMS},
+                   params={name: _read(dbutils, name, defaults[name]) for name in names})

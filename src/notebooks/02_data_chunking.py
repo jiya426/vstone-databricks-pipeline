@@ -4,67 +4,103 @@
 # environment_version = "6"
 # ///
 # MAGIC %md
-# MAGIC # 02_data_chunking - split the dataset into 4 chunks (Job: **Data Chunking**)
+# MAGIC # 02_data_chunking - land the raw dataset as exactly 4 files (Job: **Data Chunking**)
 # MAGIC
-# MAGIC | Chunk | Dates (default cut-offs) | Written as | Read later by |
+# MAGIC **Goal:** turn the raw Zillow dataset into the **4 files** the rest of the pipeline ingests:
+# MAGIC 2 CSV, 1 JSON and 1 XML. Each file becomes one Bronze table.
+# MAGIC
+# MAGIC **How:**
+# MAGIC 1. Read the 6 time-series files (state, metro, county, city, neighborhood, zip) and validate each header.
+# MAGIC 2. **Combine** them into one dataset: union by column name, add `RegionLevel` (which file a row came from);
+# MAGIC    metrics a level does not report are NULL.
+# MAGIC 3. Split the combined dataset by `Date` into 4 chunks (cut-off dates are job parameters).
+# MAGIC 4. Write each chunk as **one file** in its own folder, read it back and reconcile the row counts.
+# MAGIC
+# MAGIC | Chunk | Dates (default cut-offs) | Landed file | Bronze method |
 # MAGIC |---|---|---|---|
-# MAGIC | 1 | 1996-04 to 2005-12 | CSV `chunks/csv_initial/<level>/` | COPY INTO |
-# MAGIC | 2 | 2006-01 to 2012-12 | CSV `chunks/csv_incremental/<level>/` | Delta Live Tables |
-# MAGIC | 3 | 2013-01 to 2015-12 | JSON `chunks/json/<level>/` | Auto Loader |
-# MAGIC | 4 | 2016-01 to 2017-12 | XML `chunks/xml/<level>/` | PySpark read/write |
+# MAGIC | 1 | 1996-04 to 2005-12 | `chunk1_csv/zillow_time_series_chunk1.csv` | COPY INTO |
+# MAGIC | 2 | 2006-01 to 2012-12 | `chunk2_csv/zillow_time_series_chunk2.csv` | Delta Live Tables |
+# MAGIC | 3 | 2013-01 to 2015-12 | `chunk3_json/zillow_time_series_chunk3.json` | Auto Loader |
+# MAGIC | 4 | 2016-01 to 2017-12 | `chunk4_xml/zillow_time_series_chunk4.xml` | PySpark read/write |
 # MAGIC
-# MAGIC The two crosswalk files are copied unchanged into `chunks/csv_initial/<name>/` (assumption A2).
-# MAGIC Metadata files are not chunked. All logic lives in `vstone_framework` (chunking, chunk_io, manifest).
+# MAGIC Folder names, file names and formats come from `conf/vstone_config.json` -> `chunks`.
+# MAGIC The 2 crosswalk files are not chunked (Bronze loads them straight from the raw Volume) and the
+# MAGIC 3 metadata files are never ingested.
 # MAGIC
 # MAGIC **Multiple run scenarios** (PDF: "Notebook code must handle multiple run scenarios")
 # MAGIC
 # MAGIC | Scenario | What happens |
 # MAGIC |---|---|
-# MAGIC | First run | Every chunk is written and recorded as SUCCESS in `ops.chunk_manifest` |
-# MAGIC | Re-run, nothing changed | Whole file **skipped without reading it**; no new files, so Bronze never loads rows twice |
+# MAGIC | First run | All 4 files are written and recorded as SUCCESS in `ops.chunk_manifest` |
+# MAGIC | Re-run, nothing changed | **Skipped without reading the source**; the files stay unchanged, so Bronze never loads rows twice |
 # MAGIC | Re-run after a partial failure | Only FAILED or missing chunks are written |
 # MAGIC | Cut-off dates changed | Run stops with a clear error unless `force_rechunk = true` |
-# MAGIC | `force_rechunk = true` | All chunks are overwritten on purpose (Bronze must then be reset) |
-# MAGIC | Output folder deleted by hand | Detected (folder missing) and re-written |
+# MAGIC | `force_rechunk = true` | All 4 files are overwritten on purpose (Bronze must then be reset) |
+# MAGIC | A landed file deleted by hand | Detected (file missing) and re-written |
 
 # COMMAND ----------
 
-import json, os, sys, traceback
-from pyspark.sql import functions as F
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Widgets receive the **job parameters** (same for every task of the job, from `databricks.yml` variables)
+# MAGIC and the **task parameters** (only this task). The defaults come from `conf/vstone_config.json` and are used
+# MAGIC only when the notebook is run by hand; in a job run the job/task values override them.
 
+# COMMAND ----------
+
+import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
-from vstone_framework.chunk_io import read_back_count, write_chunk
-from vstone_framework.chunking import (CHUNK_COL, CHUNK_TARGETS, REFERENCE_FILES, TIME_SERIES_FILES,
-                                       chunk_output_path, invalid_xml_names, parse_cutoffs, plan_action,
-                                       reconcile_counts, with_chunk_no)
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+# Job parameters
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("chunks_volume", d["chunks_volume"], "Chunks Volume")
+dbutils.widgets.text("chunk1_end_date", d["chunk1_end_date"], "Chunk 1 ends on")
+dbutils.widgets.text("chunk2_end_date", d["chunk2_end_date"], "Chunk 2 ends on")
+dbutils.widgets.text("chunk3_end_date", d["chunk3_end_date"], "Chunk 3 ends on")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+# Task parameter
+dbutils.widgets.dropdown("force_rechunk", d["force_rechunk"], ["false", "true"], "Force re-chunk")
+
+ctx = get_context(dbutils, ["chunk1_end_date", "chunk2_end_date", "chunk3_end_date", "force_rechunk"])
+print(ctx)
+
+# COMMAND ----------
+
+import traceback
+from pyspark.sql import functions as F
+from vstone_framework.chunk_io import read_back_count, write_single_file
+from vstone_framework.chunking import (CHUNK_COL, CHUNK_TARGETS, COMBINED_ENTITY, LEVEL_COL, TIME_SERIES_FILES,
+                                       chunk_file, combine_levels, combined_columns, invalid_xml_names,
+                                       parse_cutoffs, plan_action, reconcile_levels, staging_folder, with_chunk_no)
 from vstone_framework.config import load_config
-from vstone_framework.manifest import clear_file_failure, ensure_manifest, manifest_lookup, record
-from vstone_framework.runtime import get_context
+from vstone_framework.manifest import clear_run_failure, ensure_manifest, level_counts_json, manifest_lookup, record
 from vstone_framework.schema_checks import assert_columns_match
 from vstone_framework.uc import load_level_fields
 
 cfg = load_config()
-ctx = get_context(dbutils, {"chunk1_end_date": "", "chunk2_end_date": "", "chunk3_end_date": "",
-                            "force_rechunk": "false"})
 cutoffs = parse_cutoffs([ctx.param("chunk1_end_date"), ctx.param("chunk2_end_date"), ctx.param("chunk3_end_date")])
 cutoff_key = ",".join(c.isoformat() for c in cutoffs)
-force = ctx.param("force_rechunk").lower() == "true"
-manifest_table = f"{ctx.ops}.chunk_manifest"
-level_fields = load_level_fields(f"{ctx.raw_path}/fields_per_level.json")
-print(f"run_id={ctx.run_id} cut-offs={cutoff_key} force={force}")
+force = ctx.bool_param("force_rechunk")
+manifest_table = ctx.ops_table("chunk_manifest")
+level_fields = load_level_fields(ctx.metadata_path("fields_per_level"))
+columns = combined_columns(level_fields)
+print(f"env={ctx.env} run_id={ctx.run_id} cut-offs={cutoff_key} force={force} combined columns={len(columns)}")
 
 ensure_manifest(spark, manifest_table)
 manifest = manifest_lookup(spark, manifest_table)
 
-def path_exists(path):
+def file_exists(path):
     try:
-        return len(dbutils.fs.ls(path)) > 0
+        dbutils.fs.ls(path)
+        return True
     except Exception:
         return False
-
-def log(source_file, level, chunk_no, fmt, path, rows, lo, hi, status, error=None):
-    record(spark, manifest_table, source_file, level, chunk_no, fmt, path, rows, lo, hi, cutoff_key, status,
-           ctx.run_id, error)
 
 # Guard: changing cut-offs after a successful split would silently mix two splits downstream
 previous = {r.cutoffs for r in manifest.values() if r.status == "SUCCESS" and r.chunk_no > 0} - {None}
@@ -72,88 +108,84 @@ if previous and previous != {cutoff_key} and not force:
     raise ValueError(f"Cut-offs changed from {previous} to {cutoff_key}. "
                      "Set force_rechunk=true to re-split (Bronze must then be reset).")
 
+plan = {}
+for n in CHUNK_TARGETS:
+    prior = manifest.get(n)
+    plan[n] = plan_action(prior.status if prior else None, file_exists(chunk_file(ctx.chunks_root, n)), force)
+print("Plan:", plan)
+
 # COMMAND ----------
 
-# MAGIC %md ## Split the six time-series files
+# MAGIC %md ## Combine the 6 time-series files and split them into 4 files
 
 # COMMAND ----------
 
-failures, summary = [], []
-for file_name, level in TIME_SERIES_FILES.items():
-    # Fast path: all 4 chunks already SUCCESS and on disk -> skip without reading the 1.9 GB source
-    prior = {n: manifest.get((file_name, n)) for n in CHUNK_TARGETS}
-    if all(plan_action(p.status if p else None, path_exists(chunk_output_path(ctx.chunks_root, n, level)), force)
-           == "skip" for n, p in prior.items()):
-        summary += [(file_name, n, CHUNK_TARGETS[n].file_format, "skipped", p.row_count) for n, p in prior.items()]
-        print(f"SKIP {file_name}: all chunks already written")
-        continue
+summary = []
+if all(action == "skip" for action in plan.values()):
+    # Fast path: all 4 files already landed and verified -> do not even read the 1.9 GB source
+    summary = [(n, CHUNK_TARGETS[n].file_name, CHUNK_TARGETS[n].file_format, "skipped", manifest[n].row_count)
+               for n in CHUNK_TARGETS]
+    print("SKIP: all 4 chunk files already landed")
+else:
     try:
-        df = spark.read.option("header", True).option("inferSchema", False).csv(f"{ctx.raw_path}/{file_name}")
-        assert_columns_match(level, level_fields[level], df.columns)
-        if invalid_xml_names(df.columns):
-            raise ValueError(f"Columns not valid as XML element names: {invalid_xml_names(df.columns)}")
+        frames = {}
+        for file_name, level in TIME_SERIES_FILES.items():
+            df = spark.read.option("header", True).option("inferSchema", False).csv(f"{ctx.raw_path}/{file_name}")
+            assert_columns_match(level, level_fields[level], df.columns)          # schema validation per file
+            frames[level] = df
+        if invalid_xml_names(columns):
+            raise ValueError(f"Columns not valid as XML element names: {invalid_xml_names(columns)}")
 
-        df = df.transform(with_chunk_no(cutoffs))
-        stats = {r[CHUNK_COL]: r for r in df.groupBy(CHUNK_COL).agg(
-            F.count(F.lit(1)).alias("n"), F.min("Date").alias("lo"), F.max("Date").alias("hi")).collect()}
-        if None in stats:
-            raise ValueError(f"{stats[None].n} rows have an unparseable Date")
+        combined = combine_levels(frames, columns).transform(with_chunk_no(cutoffs))
+        stats = combined.groupBy(CHUNK_COL, LEVEL_COL).agg(
+            F.count(F.lit(1)).alias("n"), F.min("Date").alias("lo"), F.max("Date").alias("hi")).collect()
+        if any(r[CHUNK_COL] is None for r in stats):
+            raise ValueError(f"{sum(r.n for r in stats if r[CHUNK_COL] is None)} rows have an unparseable Date")
 
-        written = {}
+        per_chunk = {n: {"rows": 0, "levels": {}, "lo": None, "hi": None} for n in CHUNK_TARGETS}
+        for r in stats:
+            c = per_chunk[r[CHUNK_COL]]
+            c["rows"] += r.n
+            c["levels"][r[LEVEL_COL]] = r.n
+            c["lo"] = min(filter(None, [c["lo"], r.lo]))
+            c["hi"] = max(filter(None, [c["hi"], r.hi]))
+        errors = reconcile_levels(cfg["expected_source_rows"], {n: c["levels"] for n, c in per_chunk.items()})
+        if errors:                                         # source -> combined reconciliation, per source file
+            raise AssertionError("Combined dataset does not match the source files:\n" + "\n".join(errors))
+
         for n, target in CHUNK_TARGETS.items():
-            path = chunk_output_path(ctx.chunks_root, n, level)
-            rows = stats[n].n if n in stats else 0
-            p = prior[n]
-            action = plan_action(p.status if p else None, path_exists(path), force)
-            if action == "skip":
-                written[n] = p.row_count
-                summary.append((file_name, n, target.file_format, "skipped", p.row_count))
+            path, c = chunk_file(ctx.chunks_root, n), per_chunk[n]
+            if plan[n] == "skip":
+                summary.append((n, target.file_name, target.file_format, "skipped", manifest[n].row_count))
                 continue
-            write_chunk(df.filter(F.col(CHUNK_COL) == n).drop(CHUNK_COL), target.file_format, path, rows,
-                        cfg["chunk_rows_per_file"])
+            write_single_file(combined.filter(F.col(CHUNK_COL) == n).drop(CHUNK_COL), target.file_format,
+                              staging_folder(ctx.chunks_root, n), path, dbutils.fs)
             got = read_back_count(spark, target.file_format, path)
-            if got != rows:
-                raise AssertionError(f"{file_name} chunk {n}: wrote {rows}, read back {got}")
-            written[n] = got
-            log(file_name, level, n, target.file_format, path, got,
-                stats[n].lo if rows else None, stats[n].hi if rows else None, "SUCCESS")
-            summary.append((file_name, n, target.file_format, action, got))
-
-        reconcile_counts(sum(r.n for r in stats.values()), written)
-        clear_file_failure(spark, manifest_table, file_name)
-        print(f"OK   {file_name}: {written}")
+            if got != c["rows"]:
+                raise AssertionError(f"chunk {n}: wrote {c['rows']}, read back {got}")
+            record(spark, manifest_table, n, target.file_name, COMBINED_ENTITY, target.file_format, path, got,
+                   level_counts_json(c["levels"]), c["lo"], c["hi"], cutoff_key, "SUCCESS", ctx.run_id)
+            summary.append((n, target.file_name, target.file_format, plan[n], got))
+            print(f"OK   chunk {n}: {got:,} rows -> {path}")
+        clear_run_failure(spark, manifest_table)
     except Exception as e:
-        failures.append(file_name)
-        log(file_name, level, 0, None, None, None, None, None, "FAILED", str(e))
-        print(f"FAIL {file_name}: {e}\n{traceback.format_exc()}")
+        record(spark, manifest_table, 0, None, COMBINED_ENTITY, None, None, None, None, None, None, cutoff_key,
+               "FAILED", ctx.run_id, str(e))
+        print(traceback.format_exc())
+        raise                                              # fails the job -> failure email
 
 # COMMAND ----------
 
-# MAGIC %md ## Copy the crosswalk (reference) files unchanged
+display(spark.createDataFrame(summary, "chunk_no INT, file_name STRING, format STRING, action STRING, rows LONG"))
+display(spark.table(manifest_table).orderBy("chunk_no"))
+print(f"Data Chunking completed: {sum(r[4] for r in summary):,} rows in {len(summary)} files.")
 
 # COMMAND ----------
 
-for file_name, name in REFERENCE_FILES.items():
-    path = chunk_output_path(ctx.chunks_root, 1, name)
-    try:
-        p = manifest.get((file_name, 1))
-        action = plan_action(p.status if p else None, path_exists(path), force)
-        if action == "skip":
-            summary.append((file_name, 1, "csv", "skipped", p.row_count))
-            continue
-        dbutils.fs.rm(path, True)
-        dbutils.fs.cp(f"{ctx.raw_path}/{file_name}", f"{path}/{file_name}")
-        rows = spark.read.option("header", True).csv(path).count()
-        log(file_name, name, 1, "csv", path, rows, None, None, "SUCCESS")
-        summary.append((file_name, 1, "csv", action, rows))
-    except Exception as e:
-        failures.append(file_name)
-        log(file_name, name, 1, "csv", path, None, None, None, "FAILED", str(e))
-        print(f"FAIL {file_name}: {e}")
-
-# COMMAND ----------
-
-display(spark.createDataFrame(summary, "source_file STRING, chunk_no INT, format STRING, action STRING, rows LONG"))
-if failures:
-    raise RuntimeError(f"Data Chunking failed for {failures}; see {manifest_table}")   # fails the job -> email
-print("Data Chunking completed.")
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Read and schema-validated the 6 raw time-series files.
+# MAGIC - Combined them into one dataset with a `RegionLevel` column (no data lost: rows per level reconcile with the source).
+# MAGIC - Landed **exactly 4 files** in the chunks Volume: 2 CSV, 1 JSON, 1 XML - one file per folder.
+# MAGIC - Recorded each file's rows, rows per level, date range and status in `ops.chunk_manifest`, which makes re-runs safe.
+# MAGIC - Every name, path, date and format came from job/task parameters or the config file - nothing hard-coded.

@@ -1,16 +1,16 @@
-# Job: Bronze ingestion - all four PDF ingestion methods, then sanity checks.
-#   chunk 1 CSV  -> COPY INTO          (bronze_copy_into_csv)
-#   chunk 2 CSV  -> Delta Live Tables  (bronze_dlt_csv_incremental)
-#   chunk 3 JSON -> Auto Loader        (bronze_autoloader_json)
-#   chunk 4 XML  -> PySpark read/write (bronze_xml)
-# The four loads are independent and run in parallel (Free Edition allows 5 concurrent tasks).
+# Job: Bronze ingestion - the 4 landed files into 4 Bronze tables, then sanity checks.
+#   chunk 1 CSV  -> COPY INTO          (task parameter chunk_no = ${var.copy_into_chunk_no}, + 2 crosswalks)
+#   chunk 2 CSV  -> Delta Live Tables  (pipeline configuration vstone.chunk_no = ${var.dlt_chunk_no})
+#   chunk 3 JSON -> Auto Loader        (task parameter chunk_no = ${var.autoloader_chunk_no})
+#   chunk 4 XML  -> PySpark read/write (task parameter chunk_no = ${var.xml_chunk_no})
+# The four loads are independent and run in parallel. Triggered only from GitHub Actions.
 resources:
   jobs:
     bronze_ingestion:
       name: vstone_bronze_ingestion
       description: >
-        Loads the 4 Zillow chunks into Bronze with COPY INTO, DLT, Auto Loader and PySpark XML,
-        then runs reconciliation and data-quality sanity checks on all 26 Bronze tables.
+        Loads the 4 landed chunk files into 4 Bronze tables with COPY INTO, DLT, Auto Loader and PySpark XML
+        (plus the 2 crosswalks with COPY INTO), then runs reconciliation and data-quality sanity checks.
       max_concurrent_runs: 1
       performance_target: PERFORMANCE_OPTIMIZED
       tags:
@@ -32,16 +32,21 @@ resources:
           default: ${var.bronze_schema}
         - name: ops_schema
           default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
         - name: run_id
           default: "{{job.run_id}}"
       tasks:
         - task_key: bronze_copy_into_csv
           notebook_task:
             notebook_path: ../src/notebooks/03a_bronze_copy_into.py
+            base_parameters:
+              chunk_no: ${var.copy_into_chunk_no}
+              include_reference: ${var.include_reference}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 3600
-        - task_key: bronze_dlt_csv_incremental
+        - task_key: bronze_dlt_csv
           pipeline_task:
             pipeline_id: ${resources.pipelines.bronze_csv_dlt.id}
             full_refresh: false
@@ -50,23 +55,30 @@ resources:
         - task_key: bronze_autoloader_json
           notebook_task:
             notebook_path: ../src/notebooks/03b_bronze_autoloader_json.py
+            base_parameters:
+              chunk_no: ${var.autoloader_chunk_no}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 3600
         - task_key: bronze_xml
           notebook_task:
             notebook_path: ../src/notebooks/03c_bronze_xml.py
+            base_parameters:
+              chunk_no: ${var.xml_chunk_no}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 3600
         - task_key: bronze_sanity_checks
           depends_on:
             - task_key: bronze_copy_into_csv
-            - task_key: bronze_dlt_csv_incremental
+            - task_key: bronze_dlt_csv
             - task_key: bronze_autoloader_json
             - task_key: bronze_xml
           notebook_task:
             notebook_path: ../src/notebooks/03z_bronze_sanity_checks.py
+            base_parameters:
+              chunk_nos: ${var.bronze_check_chunk_nos}
+              include_reference: ${var.include_reference}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 1800
