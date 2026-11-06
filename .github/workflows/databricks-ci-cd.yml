@@ -3,7 +3,7 @@ name: databricks-ci-cd
 # All Databricks jobs and pipelines are triggered from here - never with "Run now" in the Databricks UI.
 #
 # PR into dev/main     : unit + integration tests on real-data samples, bundle validation (gate)
-# push to dev          : tests -> deploy to dev -> run Data Chunking -> Bronze ingestion -> Silver transform
+# push to dev          : tests -> deploy to dev -> run Data Chunking -> Bronze ingestion -> Silver transform -> Gold
 # push to main         : tests -> deploy to prod
 # Run workflow (manual): tests -> deploy to dev -> run the job(s) picked in the form
 on:
@@ -22,6 +22,7 @@ on:
           - data_chunking
           - bronze_ingestion
           - silver_transform
+          - gold
           - none
 
 jobs:
@@ -80,6 +81,9 @@ jobs:
       - name: "Run job: Silver transform (cleaning, business rules, features + checks)"
         if: env.JOBS == 'all' || env.JOBS == 'silver_transform'
         run: databricks bundle run -t dev silver_transform
+      - name: "Run job: Gold (star schema, aggregates, checks, business glossary)"
+        if: env.JOBS == 'all' || env.JOBS == 'gold'
+        run: databricks bundle run -t dev gold
 
   deploy-prod:
     name: Deploy to prod
