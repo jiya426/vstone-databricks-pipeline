@@ -1,0 +1,21 @@
+# Lakeflow Declarative Pipeline (DLT): Silver -> Gold star schema + aggregates.
+#   SCD Type 2 dimensions (AUTO CDC from snapshot) -> current dimensions (PK) -> fact (FK) -> aggregates
+# A pipeline has no widgets: its parameters are the `configuration` keys, read with spark.conf.get().
+resources:
+  pipelines:
+    gold_dlt:
+      name: vstone_gold_dlt
+      catalog: ${var.catalog}
+      schema: ${var.gold_schema}
+      serverless: true
+      continuous: false
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ../src/pipelines/gold_dlt.py
+      configuration:
+        vstone.catalog: ${var.catalog}
+        vstone.silver_schema: ${var.silver_schema}
+        vstone.gold_schema: ${var.gold_schema}
+        vstone.env: ${bundle.target}
+        vstone.framework_path: ${workspace.file_path}/src

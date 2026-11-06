@@ -1,0 +1,56 @@
+# Job: Gold (PDF Day 6). Silver -> Gold star schema and aggregates, then checks and the business glossary.
+#   gold_pipeline (DLT) -> gold_checks + business_glossary (parallel)
+# Job parameters -> every notebook task. Triggered only from GitHub Actions.
+resources:
+  jobs:
+    gold:
+      name: vstone_gold
+      description: >
+        Runs the Gold Lakeflow pipeline (SCD Type 2 dimensions, fact with primary/foreign keys, top-10, monthly
+        trend and state sales aggregates), then reconciles and checks the star schema and refreshes the business glossary.
+      max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
+      tags:
+        project: vstone
+        layer: gold
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+        - name: governance_schema
+          default: ${var.governance_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
+        - name: run_id
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: gold_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_dlt.id}
+            full_refresh: false
+          max_retries: 0
+          timeout_seconds: 7200
+        - task_key: gold_checks
+          depends_on:
+            - task_key: gold_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/06z_gold_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
+        - task_key: business_glossary
+          depends_on:
+            - task_key: gold_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/06b_business_glossary.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
