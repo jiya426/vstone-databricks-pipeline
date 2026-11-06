@@ -1,8 +1,11 @@
 """Bronze-layer definitions and SQL/schema builders.
 
 Every Bronze table is described once by a `BronzeSource`, generated from conf/vstone_config.json:
-    6 levels x 4 chunk methods (copy_into, dlt, autoloader, pyspark_xml) = 24 time-series tables
-  + 2 crosswalk tables (copy_into)                                       = 26 Bronze tables
+    4 chunk files -> 4 time-series tables (COPY INTO, DLT, Auto Loader, PySpark XML)
+  + 2 crosswalk files loaded with COPY INTO straight from the raw Volume  = 6 Bronze tables
+
+The 4 time-series tables share one column contract: the combined columns of all 6 levels
+(Date, RegionName, RegionLevel, every metric) - see chunking.combined_columns.
 """
 from __future__ import annotations
 
@@ -12,80 +15,100 @@ from typing import Dict, Iterable, List, Optional, Sequence
 from pyspark.sql.types import StringType, StructField, StructType
 
 from .audit import AUDIT_COLUMN_COMMENTS, AUDIT_COLUMNS
+from .chunking import COMBINED_ENTITY, LEVEL_COL, LEVELS, combined_columns
 from .config import load_config
 from .metadata import sql_string
 
 _CFG = load_config()
 RESCUED_COL: str = _CFG["rescued_data_column"]
-TIME_SERIES_LEVELS: List[str] = list(_CFG["levels"])
 CROSSWALK_COLUMNS: Dict[str, List[str]] = {k: list(v) for k, v in _CFG["reference_columns"].items()}
+REFERENCE_FILE_OF: Dict[str, str] = {name: f for f, name in _CFG["reference_files"].items()}
 
-LEVEL_DESCRIPTIONS = {
-    "state": "US states (plus a national 'UnitedStates' row)",
-    "metro": "metropolitan areas keyed by CBSA code (plus 'United_States')",
-    "county": "counties keyed by FIPS code",
-    "city": "cities keyed by Zillow city slug",
-    "neighborhood": "neighborhoods keyed by Zillow region id",
-    "zip": "ZIP codes",
-}
 METHOD_TEXT = {
-    "copy_into": "chunk 1 (initial load) from CSV with COPY INTO",
-    "dlt": "chunk 2 (incremental) from CSV with a Delta Live Tables streaming table",
-    "autoloader": "chunk 3 from JSON with Auto Loader",
-    "pyspark_xml": "chunk 4 from XML with PySpark read/write",
+    "copy_into": "chunk 1 CSV file loaded with COPY INTO",
+    "dlt": "chunk 2 CSV file loaded with a Delta Live Tables streaming table",
+    "autoloader": "chunk 3 JSON file loaded with Auto Loader",
+    "pyspark_xml": "chunk 4 XML file loaded with PySpark read/write",
 }
 
 
 @dataclass(frozen=True)
 class BronzeSource:
-    entity: str                # state ... zip, county_crosswalk, city_crosswalk
+    entity: str                # time_series, county_crosswalk, city_crosswalk
     table: str                 # table name inside the bronze schema
-    folder: str                # folder under the chunks Volume
+    folder: str                # folder under its Volume (chunks Volume, or raw Volume for crosswalks)
     key_columns: tuple         # natural key used by sanity checks
     description: str
     method: str = "copy_into"  # copy_into | dlt | autoloader | pyspark_xml
-    chunk_no: int = 1
+    chunk_no: int = 0          # 1-4 for time series, 0 for crosswalks (not chunked)
     source: str = "copy_into_csv"   # value written to the audit column `source`
     file_format: str = "csv"
+    file_name: str = ""        # the single file this table is loaded from
     has_rescued: bool = False  # True when the table keeps a _rescued_data column
 
     @property
     def is_reference(self) -> bool:
         return self.entity in CROSSWALK_COLUMNS
 
+    def landing_path(self, chunks_root: str, raw_path: str) -> str:
+        """Folder COPY INTO / Auto Loader / DLT / XML read from."""
+        root = raw_path if self.is_reference else chunks_root
+        return f"{root.rstrip('/')}/{self.folder}".rstrip("/")
 
-def bronze_sources(methods: Optional[Iterable[str]] = None) -> List[BronzeSource]:
-    """All Bronze tables, optionally filtered by ingestion method, in a stable order."""
-    wanted = set(methods) if methods else None
-    out: List[BronzeSource] = []
+
+def time_series_sources(chunk_nos: Optional[Iterable[int]] = None) -> List[BronzeSource]:
+    """The 4 time-series Bronze tables, one per chunk file (optionally only some chunks)."""
+    wanted = {int(n) for n in chunk_nos} if chunk_nos is not None else None
+    out = []
     for n in sorted(_CFG["chunks"], key=int):
-        c = _CFG["chunks"][n]
-        if wanted and c["method"] not in wanted:
+        if wanted is not None and int(n) not in wanted:
             continue
-        for lvl in TIME_SERIES_LEVELS:
-            out.append(BronzeSource(
-                entity=lvl, table=f"{lvl}_{c['table_suffix']}", folder=f"{c['folder']}/{lvl}",
-                key_columns=tuple(_CFG["time_series_key"]),
-                description=(f"Bronze: raw Zillow monthly housing metrics for {LEVEL_DESCRIPTIONS[lvl]}, "
-                             f"{METHOD_TEXT[c['method']]}. All source columns kept as STRING."),
-                method=c["method"], chunk_no=int(n), source=c["source"], file_format=c["format"],
-                has_rescued=c["method"] != "copy_into"))
-        if c["method"] == "copy_into":
-            for ref, cols in CROSSWALK_COLUMNS.items():
-                out.append(BronzeSource(
-                    entity=ref, table=ref, folder=f"{c['folder']}/{ref}", key_columns=tuple(_CFG["reference_keys"][ref]),
-                    description=(f"Bronze: Zillow {ref.replace('_', ' ')} reference data, loaded with COPY INTO."),
-                    method="copy_into", chunk_no=int(n), source=c["source"], file_format="csv"))
+        c = _CFG["chunks"][n]
+        out.append(BronzeSource(
+            entity=COMBINED_ENTITY, table=c["table"], folder=c["folder"],
+            key_columns=tuple(_CFG["time_series_key"]),
+            description=(f"Bronze: raw Zillow monthly housing metrics for all {len(LEVELS)} geography levels "
+                         f"({', '.join(LEVELS)}; column {LEVEL_COL}), {METHOD_TEXT[c['method']]} "
+                         f"({c['file_name']}). All source columns kept as STRING."),
+            method=c["method"], chunk_no=int(n), source=c["source"], file_format=c["format"],
+            file_name=c["file_name"], has_rescued=c["method"] != "copy_into"))
     return out
 
 
-def copy_into_sources() -> List[BronzeSource]:
-    return bronze_sources(["copy_into"])
+def reference_sources() -> List[BronzeSource]:
+    """The 2 crosswalk tables, loaded with COPY INTO from the raw Volume (not chunked)."""
+    ref = _CFG["reference_load"]
+    return [BronzeSource(entity=name, table=name, folder="", key_columns=tuple(_CFG["reference_keys"][name]),
+                         description=f"Bronze: Zillow {name.replace('_', ' ')} reference data ({file}), "
+                                     f"loaded with COPY INTO from the raw Volume (not chunked).",
+                         method=ref["method"], chunk_no=0, source=ref["source"], file_format="csv", file_name=file)
+            for file, name in _CFG["reference_files"].items()]
+
+
+def bronze_sources(methods: Optional[Iterable[str]] = None) -> List[BronzeSource]:
+    """All 6 Bronze tables (4 time series + 2 crosswalks), optionally filtered by ingestion method."""
+    wanted = set(methods) if methods else None
+    return [s for s in time_series_sources() + reference_sources() if wanted is None or s.method in wanted]
+
+
+def source_for_chunk(chunk_no: int) -> BronzeSource:
+    """The Bronze table fed by one chunk file - notebooks pick it from their `chunk_no` task parameter."""
+    found = time_series_sources([chunk_no])
+    if not found:
+        raise ValueError(f"No chunk {chunk_no} in config; valid: {sorted(int(n) for n in _CFG['chunks'])}")
+    return found[0]
+
+
+def require_method(src: BronzeSource, method: str) -> BronzeSource:
+    """Guard: a notebook built for one ingestion method must not be given another chunk."""
+    if src.method != method:
+        raise ValueError(f"chunk {src.chunk_no} is configured for '{src.method}', this notebook does '{method}'")
+    return src
 
 
 def contract_columns(src: BronzeSource, level_fields: Dict[str, List[str]]) -> List[str]:
     """Source columns a Bronze table must hold (before audit columns)."""
-    return CROSSWALK_COLUMNS[src.entity] if src.is_reference else list(level_fields[src.entity])
+    return CROSSWALK_COLUMNS[src.entity] if src.is_reference else combined_columns(level_fields)
 
 
 def table_columns(src: BronzeSource, level_fields: Dict[str, List[str]]) -> List[str]:
@@ -96,9 +119,9 @@ def table_columns(src: BronzeSource, level_fields: Dict[str, List[str]]) -> List
 def header_ordered_columns(header: Sequence[str], contract: Sequence[str]) -> List[str]:
     """Return the contract columns in the FILE's header order.
 
-    Spark applies an explicit CSV schema by POSITION, not by name. fields_per_level.json lists the
-    columns in a different order from the CSV header, so the schema must follow the header order -
-    otherwise values silently land in the wrong columns. The set of columns must still match the contract.
+    Spark applies an explicit CSV schema by POSITION, not by name. If the file's column order ever differs
+    from the contract, the schema must follow the header order - otherwise values silently land in the
+    wrong columns. The set of columns must still match the contract.
     """
     header = [h.lstrip("\ufeff") for h in header]
     if sorted(header) != sorted(contract):
@@ -108,14 +131,16 @@ def header_ordered_columns(header: Sequence[str], contract: Sequence[str]) -> Li
     return list(header)
 
 
-def first_csv_header(folder: str) -> List[str]:
-    """Header row of the first .csv file in a folder (works on /Volumes paths via the local file API)."""
+def first_csv_header(path: str) -> List[str]:
+    """Header row of a CSV file, or of the first .csv file in a folder (works on /Volumes paths)."""
     import csv
     import os
-    files = sorted(f for f in os.listdir(folder) if f.endswith(".csv"))
-    if not files:
-        raise FileNotFoundError(f"No .csv files in {folder}")
-    with open(os.path.join(folder, files[0]), newline="", encoding="utf-8-sig") as fh:
+    if os.path.isdir(path):
+        files = sorted(f for f in os.listdir(path) if f.endswith(".csv"))
+        if not files:
+            raise FileNotFoundError(f"No .csv files in {path}")
+        path = os.path.join(path, files[0])
+    with open(path, newline="", encoding="utf-8-sig") as fh:
         return next(csv.reader(fh))
 
 

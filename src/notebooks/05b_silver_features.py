@@ -17,6 +17,30 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+# Task parameter: region shown in the preview at the end
+dbutils.widgets.text("demo_region", d["demo_region"], "Preview region (state)")
+
+ctx = get_context(dbutils, ["demo_region"])
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from pyspark.sql import functions as F
@@ -30,7 +54,6 @@ from vstone_framework.uc import comment_table, set_tags, table_ddl
 
 cfg = load_config()
 rules, scfg, ccfg = cfg["business_rules"], cfg["silver"], cfg["silver"]["conformed"]
-ctx = get_context(dbutils)
 ensure_ops_tables(spark, ctx.ops)
 table = f"{ctx.silver}.{ccfg['features_table']}"
 comment = "Silver: engineered features per region and month (value and rent growth, rent yield, tier spread, listing premium)"
@@ -50,6 +73,12 @@ def build_features(level):
 results = run_per_table(cfg["levels"], lambda l: f"{table} [{l}]", build_features,
                         run_log_logger(spark, ctx.ops, ctx.run_id, "silver", "silver_features"))
 display(spark.createDataFrame(results_rows(results), RESULTS_SCHEMA))
-display(spark.table(table).filter("region_key = 'state:California' AND month = 1").orderBy("date")
+display(spark.table(table).filter(f"region_key = 'state:{ctx.param('demo_region')}' AND month = 1").orderBy("date")
         .select("date", "zhvi_all_homes", "zhvi_yoy_pct", "gross_rent_yield_pct", "tier_spread_ratio"))
-raise_if_failed(results, "Silver features", f"{ctx.ops}.pipeline_run_log")
+raise_if_failed(results, "Silver features", ctx.ops_table("run_log"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Computed meaningful features per region and month: MoM and YoY growth, price-to-rent, rent yield, tier spread, listing discount.

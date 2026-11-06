@@ -12,9 +12,10 @@ from pyspark.sql import functions as F
 from pyspark.testing import assertDataFrameEqual
 
 from vstone_framework.audit import AUDIT_COLUMNS, with_audit_columns
-from vstone_framework.bronze import (bronze_sources, contract_columns, first_csv_header, header_ordered_columns,
-                                     string_schema)
-from vstone_framework.chunking import parse_cutoffs, reconcile_counts, with_chunk_no
+from vstone_framework.bronze import (contract_columns, first_csv_header, header_ordered_columns, string_schema,
+                                     time_series_sources)
+from vstone_framework.chunking import (LEVEL_COL, combine_levels, combined_columns, parse_cutoffs, reconcile_counts,
+                                       with_chunk_no)
 from vstone_framework.metadata import column_comment, load_data_dictionary
 from vstone_framework.quality import failed, run_sanity_checks
 from vstone_framework.schema_checks import compare_columns
@@ -90,17 +91,19 @@ def test_known_defects_present_in_sample(spark):
 
 
 def test_bronze_load_of_sample_passes_sanity_checks(spark):
-    """Simulates a Bronze load of the sample (all four sources) and runs the production sanity checks."""
-    for src in [s for s in bronze_sources() if s.entity == "zip"]:
+    """Simulates the 4 Bronze loads of the combined sample (one table per chunk file) and runs the production checks."""
+    combined = combine_levels({lvl: read_sample(spark, lvl) for lvl in LEVELS}, combined_columns(FIELDS))
+    chunked = combined.transform(with_chunk_no(CUTOFFS))
+    for src in time_series_sources():
         cols = contract_columns(src, FIELDS)
-        assert sorted(cols) == sorted(sample_columns("zip"))
-        chunk = read_sample(spark, "zip").transform(with_chunk_no(CUTOFFS)).filter(f"chunk_no = {src.chunk_no}")
+        chunk = chunked.filter(f"chunk_no = {src.chunk_no}").drop("chunk_no")
         expected_rows = chunk.count()
-        loaded = chunk.drop("chunk_no").transform(with_audit_columns(src.source, "test-run", F.lit("fixture.csv")))
+        loaded = chunk.transform(with_audit_columns(src.source, "test-run", F.lit(src.file_name)))
         if src.has_rescued:
             loaded = loaded.withColumn("_rescued_data", F.lit(None).cast("string"))
         results = run_sanity_checks(loaded, src.table, src.key_columns, expected_rows, cols, AUDIT_COLUMNS,
-                                    rescued_column="_rescued_data" if src.has_rescued else None)
+                                    rescued_column="_rescued_data" if src.has_rescued else None,
+                                    allowed_values={LEVEL_COL: LEVELS})
         assert failed(results) == [], [r for r in failed(results)]
 
 

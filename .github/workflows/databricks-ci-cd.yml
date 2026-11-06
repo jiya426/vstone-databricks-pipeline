@@ -1,14 +1,28 @@
 name: databricks-ci-cd
 
-# PR into dev/main : unit tests + bundle validation (gate)
-# push to dev      : tests -> deploy to dev -> integration run of the jobs on serverless
-# push to main     : tests -> deploy to prod
+# All Databricks jobs and pipelines are triggered from here - never with "Run now" in the Databricks UI.
+#
+# PR into dev/main     : unit + integration tests on real-data samples, bundle validation (gate)
+# push to dev          : tests -> deploy to dev -> run Data Chunking -> Bronze ingestion -> Silver transform
+# push to main         : tests -> deploy to prod
+# Run workflow (manual): tests -> deploy to dev -> run the job(s) picked in the form
 on:
   pull_request:
     branches: [dev, main]
   push:
     branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      jobs_to_run:
+        description: Which dev job(s) to run after deploying
+        type: choice
+        default: all
+        options:
+          - all
+          - data_chunking
+          - bronze_ingestion
+          - silver_transform
+          - none
 
 jobs:
   test:
@@ -28,7 +42,7 @@ jobs:
           java-version: "17"
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
-      - name: Run unit tests
+      - name: Run unit and integration tests
         run: pytest tests -v --junitxml=test-results.xml
       - name: Upload test report
         if: always()
@@ -42,22 +56,30 @@ jobs:
         run: databricks bundle validate -t dev
 
   deploy-dev:
-    name: Deploy to dev and run integration
+    name: Deploy to dev and run the jobs
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.jobs_to_run || 'all' }}
     steps:
       - uses: actions/checkout@v4
       - uses: databricks/setup-cli@main
       - name: Deploy bundle to dev
         run: databricks bundle deploy -t dev
-      - name: "Integration: Data Chunking job (idempotent - completed chunks are skipped)"
+      - name: "Run job: Data Chunking (lands the 4 files; skipped files are not rewritten)"
+        if: env.JOBS == 'all' || env.JOBS == 'data_chunking'
         run: databricks bundle run -t dev data_chunking
-      - name: "Integration: Bronze ingestion job + sanity checks (re-run loads only new files)"
+      - name: "Run job: Bronze ingestion (4 files -> 4 Bronze tables + sanity checks)"
+        if: env.JOBS == 'all' || env.JOBS == 'bronze_ingestion'
         run: databricks bundle run -t dev bronze_ingestion
+      - name: "Run job: Silver transform (cleaning, business rules, features + checks)"
+        if: env.JOBS == 'all' || env.JOBS == 'silver_transform'
+        run: databricks bundle run -t dev silver_transform
 
   deploy-prod:
     name: Deploy to prod

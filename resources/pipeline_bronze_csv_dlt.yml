@@ -1,4 +1,5 @@
-# Lakeflow Declarative Pipeline (DLT): CSV chunk 2 -> Bronze streaming tables (PDF Day 3)
+# Lakeflow Declarative Pipeline (DLT): chunk 2 CSV file -> one Bronze streaming table.
+# A pipeline has no widgets: its parameters are the `configuration` keys, read with spark.conf.get().
 resources:
   pipelines:
     bronze_csv_dlt:
@@ -16,4 +17,6 @@ resources:
         vstone.landing_schema: ${var.landing_schema}
         vstone.raw_volume: ${var.raw_volume}
         vstone.chunks_volume: ${var.chunks_volume}
+        vstone.chunk_no: ${var.dlt_chunk_no}
+        vstone.env: ${bundle.target}
         vstone.framework_path: ${workspace.file_path}/src

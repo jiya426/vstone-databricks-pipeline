@@ -29,6 +29,27 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 # MAGIC %pip install kaggle --quiet
 
 # COMMAND ----------
@@ -44,7 +65,6 @@ from vstone_framework.runtime import get_context
 
 cfg = load_config()
 kcfg = cfg["kaggle"]
-ctx = get_context(dbutils)
 target = ctx.volume_path(kcfg["target_volume"])
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {ctx.landing}.{kcfg['target_volume']} "
           "COMMENT 'Zillow files downloaded automatically with the Kaggle API'")
@@ -103,3 +123,10 @@ display(spark.createDataFrame(rows, "file STRING, expected_bytes LONG, actual_by
 bad = [r[0] for r in rows if r[3] != "OK"]
 assert not bad, f"Files missing or different: {bad}"
 print(f"Kaggle ingestion verified: {len(rows)} files in {target}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Downloaded the Zillow dataset from Kaggle with the API, using credentials from the Databricks secret scope (never in code).
+# MAGIC - Landed the raw files in the raw Volume, ready for profiling and chunking.

@@ -17,6 +17,29 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import json, os, sys
 from datetime import datetime, timezone
 from pyspark.sql import functions as F
@@ -28,7 +51,6 @@ from vstone_framework.runtime import get_context
 from vstone_framework.schema_checks import compare_columns
 
 cfg = load_config()
-ctx = get_context(dbutils)
 ops, raw_path = ctx.ops, ctx.raw_path
 profiled_at = datetime.now(timezone.utc)
 
@@ -37,7 +59,11 @@ def read_raw_csv(file_name):
     return (spark.read.option("header", True).option("inferSchema", False)
             .csv(f"{raw_path}/{file_name}"))
 
-with open(f"{raw_path}/fields_per_level.json") as fh:
+FILE_OF = {level: f for f, level in cfg["time_series_files"].items()}       # level -> raw file name
+REF_FILE_OF = {name: f for f, name in cfg["reference_files"].items()}      # crosswalk -> raw file name
+FIPS_WIDTH = cfg["business_rules"]["region_code_padding"]["county"]
+
+with open(ctx.metadata_path("fields_per_level")) as fh:
     expected_fields = json.load(fh)          # {"City": [...], "Zip": [...], ...}
 
 # COMMAND ----------
@@ -93,7 +119,7 @@ file_schema = ("file_name STRING, level STRING, row_count LONG, distinct_regions
                "unexpected_columns STRING")
 file_df = (spark.createDataFrame(file_rows, file_schema)
            .withColumn("profiled_at", F.lit(profiled_at)))
-file_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(f"{ops}.profile_file_summary")
+file_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(ctx.ops_table("profile_file_summary"))
 display(file_df.orderBy(F.desc("row_count")))
 
 # COMMAND ----------
@@ -105,7 +131,7 @@ display(file_df.orderBy(F.desc("row_count")))
 col_df = (spark.createDataFrame(column_rows, "level STRING, column_name STRING, row_count LONG, "
           "filled_cells LONG, fill_rate_pct DOUBLE, non_numeric_cells LONG, negative_cells LONG")
           .withColumn("profiled_at", F.lit(profiled_at)))
-col_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(f"{ops}.profile_column_stats")
+col_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(ctx.ops_table("profile_column_stats"))
 display(col_df.filter("non_numeric_cells > 0 OR negative_cells > 0").orderBy("level", "column_name"))
 
 # COMMAND ----------
@@ -129,9 +155,9 @@ for file_name, ref_name in REFERENCE_FILES.items():
 
 # COMMAND ----------
 
-cw = read_raw_csv("CountyCrossWalk_Zillow.csv")
+cw = read_raw_csv(REF_FILE_OF["county_crosswalk"])
 cw = cw.toDF(*[c.lstrip("﻿") for c in cw.columns])          # strip the UTF-8 BOM
-city_cw = read_raw_csv("cities_crosswalk.csv")
+city_cw = read_raw_csv(REF_FILE_OF["city_crosswalk"])
 
 def regions(file_name):
     return read_raw_csv(file_name).select("RegionName").distinct()
@@ -143,24 +169,24 @@ def coverage(file_name, keys_df, transform=lambda c: c):
     return total, matched
 
 findings = []
-t, m = coverage("County_time_series.csv", cw.select(F.col("FIPS").alias("k")))
+t, m = coverage(FILE_OF["county"], cw.select(F.col("FIPS").alias("k")))
 findings.append(("county", "FIPS join without padding", t, m))
-t, m = coverage("County_time_series.csv", cw.select(F.col("FIPS").alias("k")), lambda c: F.lpad(c, 5, "0"))
+t, m = coverage(FILE_OF["county"], cw.select(F.col("FIPS").alias("k")), lambda c: F.lpad(c, FIPS_WIDTH, "0"))
 findings.append(("county", "FIPS join after lpad(5,'0')", t, m))
-t, m = coverage("Metro_time_series.csv", cw.select(F.col("CBSACode").alias("k")))
+t, m = coverage(FILE_OF["metro"], cw.select(F.col("CBSACode").alias("k")))
 findings.append(("metro", "CBSACode join", t, m))
-t, m = coverage("State_time_series.csv", cw.select(F.regexp_replace("StateName", " ", "").alias("k")))
+t, m = coverage(FILE_OF["state"], cw.select(F.regexp_replace("StateName", " ", "").alias("k")))
 findings.append(("state", "StateName (spaces removed) join", t, m))
-t, m = coverage("City_time_series.csv", city_cw.select(F.col("Unique_City_ID").alias("k")))
+t, m = coverage(FILE_OF["city"], city_cw.select(F.col("Unique_City_ID").alias("k")))
 findings.append(("city", "Unique_City_ID join", t, m))
 
-nb = read_raw_csv("Neighborhood_time_series.csv")
+nb = read_raw_csv(FILE_OF["neighborhood"])
 bad_nb = nb.filter(~F.col("RegionName").rlike("^[0-9]+$"))
 findings.append(("neighborhood", "RegionName not all digits (malformed, rows)", nb.count(), bad_nb.count()))
 
 dq_df = (spark.createDataFrame(findings, "level STRING, check_name STRING, total LONG, matched_or_flagged LONG")
          .withColumn("profiled_at", F.lit(profiled_at)))
-dq_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(f"{ops}.profile_dq_findings")
+dq_df.write.mode("overwrite").option("overwriteSchema", True).saveAsTable(ctx.ops_table("profile_dq_findings"))
 display(dq_df)
 display(bad_nb.select("Date", "RegionName").limit(5))
 
@@ -170,7 +196,7 @@ display(bad_nb.select("Date", "RegionName").limit(5))
 
 # COMMAND ----------
 
-display(spark.read.option("header", True).csv(f"{raw_path}/DataDictionary.csv"))
+display(spark.read.option("header", True).csv(ctx.metadata_path("data_dictionary")))
 
 # COMMAND ----------
 
@@ -188,3 +214,10 @@ assert all(r.duplicate_keys == 0 and r.bad_dates == 0 for r in file_df.collect()
 assert all(r.missing_columns is None and r.unexpected_columns is None for r in file_df.collect()), "Header mismatch"
 assert bad_nb.count() == cfg["expected_malformed_neighborhood_rows"], "Unexpected number of malformed neighborhood rows"
 print(f"Profiling validated: {sum(actual.values()):,} rows across 6 files.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Profiled all raw files: rows, columns, keys, date ranges, fill rate, numeric validity and crosswalk coverage.
+# MAGIC - Saved the results to the ops profiling tables; these findings drive the Silver quality rules and the assumptions document.

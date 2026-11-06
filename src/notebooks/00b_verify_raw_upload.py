@@ -10,13 +10,34 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from vstone_framework.config import load_config
 from vstone_framework.runtime import get_context
 
 expected_bytes = load_config()["expected_raw_bytes"]
-ctx = get_context(dbutils)
 
 # COMMAND ----------
 
@@ -28,3 +49,10 @@ display(spark.createDataFrame(rows, "file STRING, expected_bytes LONG, actual_by
 problems = [r[0] for r in rows if r[3] != "OK"]
 assert not problems, f"Re-upload these files: {problems}"
 print(f"All {len(rows)} files present with correct sizes.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Checked that all 11 raw files are in the raw Volume with exactly the expected byte sizes (from config).
+# MAGIC - Proves the upload is complete and not truncated before anything else runs.

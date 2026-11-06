@@ -1,12 +1,15 @@
-# Job: Data Chunking (PDF Day 1). Splits the raw dataset into 4 chunks, then validates them.
+# Job: Data Chunking (PDF Day 1). Lands the raw dataset as exactly 4 files (2 CSV, 1 JSON, 1 XML), then validates them.
+# Code parameterization:
+#   job parameters  -> every task (names, paths, cut-off dates, env, run id) - values from databricks.yml variables
+#   task parameters -> one task only (force_rechunk for chunk_dataset)
 resources:
   jobs:
     data_chunking:
       name: Data Chunking
       description: >
-        Splits the six Zillow time-series files into 4 date-based chunks
-        (CSV initial, CSV incremental, JSON, XML), copies the crosswalks, and
-        validates the result. Safe to re-run: completed chunks are skipped.
+        Combines the six Zillow time-series files into one dataset (RegionLevel column), splits it by date
+        into 4 chunks and lands exactly 4 files: chunk 1 CSV, chunk 2 CSV, chunk 3 JSON, chunk 4 XML.
+        Safe to re-run: landed files are skipped. Triggered only from GitHub Actions.
       max_concurrent_runs: 1
       performance_target: PERFORMANCE_OPTIMIZED
       tags:
@@ -20,26 +23,38 @@ resources:
           default: ${var.catalog}
         - name: landing_schema
           default: ${var.landing_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
         - name: raw_volume
           default: ${var.raw_volume}
         - name: chunks_volume
           default: ${var.chunks_volume}
-        - name: ops_schema
-          default: ${var.ops_schema}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
         - name: chunk1_end_date
           default: ${var.chunk1_end_date}
         - name: chunk2_end_date
           default: ${var.chunk2_end_date}
         - name: chunk3_end_date
           default: ${var.chunk3_end_date}
-        - name: force_rechunk
-          default: "false"
+        - name: env
+          default: ${bundle.target}
         - name: run_id
           default: "{{job.run_id}}"
       tasks:
+        - task_key: remove_old_layout
+          notebook_task:
+            notebook_path: ../src/notebooks/02a_remove_old_layout.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
         - task_key: chunk_dataset
+          depends_on:
+            - task_key: remove_old_layout
           notebook_task:
             notebook_path: ../src/notebooks/02_data_chunking.py
+            base_parameters:
+              force_rechunk: ${var.force_rechunk}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 7200

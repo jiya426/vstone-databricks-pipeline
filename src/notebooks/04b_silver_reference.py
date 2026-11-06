@@ -11,6 +11,31 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parameters
+# MAGIC Job parameters arrive as widgets (values from `databricks.yml` variables); the defaults come from
+# MAGIC `conf/vstone_config.json` and are used only when the notebook is run by hand.
+
+# COMMAND ----------
+
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+from vstone_framework.runtime import get_context, widget_defaults
+
+d = widget_defaults()
+dbutils.widgets.text("catalog", d["catalog"], "Catalog")
+dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("bronze_schema", d["bronze_schema"], "Bronze schema")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
+dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
+dbutils.widgets.text("env", d["env"], "Environment")
+dbutils.widgets.text("run_id", d["run_id"], "Job run id")
+
+ctx = get_context(dbutils)
+
+# COMMAND ----------
+
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 from pyspark.sql import functions as F
@@ -25,15 +50,14 @@ from vstone_framework.silver import REFERENCE_RULES, clean_reference
 from vstone_framework.uc import comment_table, set_tags
 
 cfg, scfg = load_config(), load_config()["silver"]
-ctx = get_context(dbutils)
 ensure_ops_tables(spark, ctx.ops)
-dictionary = load_data_dictionary(f"{ctx.raw_path}/DataDictionary.csv")
+dictionary = load_data_dictionary(ctx.metadata_path("data_dictionary"))
 
 # COMMAND ----------
 
 def build_reference(name):
     table = f"{ctx.silver}.{name}"
-    bronze_df = spark.table(f"{ctx.bronze}.{name}").filter(F.col("source") == "copy_into_csv")
+    bronze_df = spark.table(f"{ctx.bronze}.{name}").filter(F.col("source") == cfg["reference_load"]["source"])
     bronze_rows = bronze_df.count()
     mapping = header_mapping(spark, CROSSWALK_COLUMNS[name], method=scfg["header_udf"])
     comments = {mapping[c]: column_comment(c, dictionary) for c in CROSSWALK_COLUMNS[name]}
@@ -49,4 +73,11 @@ def build_reference(name):
 results = run_per_table(list(REFERENCE_RULES), lambda n: f"{ctx.silver}.{n}", build_reference,
                         run_log_logger(spark, ctx.ops, ctx.run_id, "silver", "silver_reference"))
 display(spark.createDataFrame(results_rows(results), RESULTS_SCHEMA))
-raise_if_failed(results, "Silver reference", f"{ctx.ops}.pipeline_run_log")
+raise_if_failed(results, "Silver reference", ctx.ops_table("run_log"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Cleaned the 2 crosswalks: snake_case headers, trimmed text, zero-padded codes, upper-case state codes.
+# MAGIC - Dropped null keys, kept one row per key, and wrote documented Silver reference tables.

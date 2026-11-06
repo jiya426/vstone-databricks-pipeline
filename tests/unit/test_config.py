@@ -22,6 +22,23 @@ def test_validate_config_rejects_missing_chunk():
         validate_config(bad)
 
 
+def test_validate_config_requires_four_distinct_files():
+    bad = copy.deepcopy(load_config())
+    bad["chunks"]["2"]["file_name"] = bad["chunks"]["1"]["file_name"]
+    with pytest.raises(ValueError, match="4 different files"):
+        validate_config(bad)
+    bad = copy.deepcopy(load_config())
+    del bad["chunks"]["3"]["table"]
+    with pytest.raises(ValueError, match="missing keys"):
+        validate_config(bad)
+
+
+def test_every_job_and_task_parameter_has_a_default():
+    d = load_config()["defaults"]
+    for name in ["chunk_no", "chunk_nos", "include_reference", "levels", "force_rechunk", "env", "demo_region"]:
+        assert name in d, name
+
+
 def test_validate_config_rejects_unmapped_level():
     bad = copy.deepcopy(load_config())
     bad["levels"] = bad["levels"] + ["country"]

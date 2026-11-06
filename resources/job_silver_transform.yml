@@ -1,12 +1,14 @@
 # Job: Silver transform (PDF Days 4-5).
 #   Day 4: silver_time_series + silver_reference (parallel) -> silver_sanity_checks
 #   Day 5: silver_conformed (business rules) + silver_features (parallel) -> silver_conformed_checks
+# Job parameters -> every task; task parameters: levels (silver_time_series), demo_region (silver_features).
+# Triggered only from GitHub Actions.
 resources:
   jobs:
     silver_transform:
       name: vstone_silver_transform
       description: >
-        Bronze -> Silver: union of the 4 Bronze sources per level, quality rules with quarantine,
+        Bronze -> Silver: each level's rows from the 4 Bronze tables, quality rules with quarantine,
         typing, null handling, deduplication, snake_case headers via pandas UDF, reconciliation and checks;
         then business rules (units, currency normalisation, date keys, region standardisation), long table and features.
       max_concurrent_runs: 1
@@ -30,12 +32,16 @@ resources:
           default: ${var.silver_schema}
         - name: ops_schema
           default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
         - name: run_id
           default: "{{job.run_id}}"
       tasks:
         - task_key: silver_time_series
           notebook_task:
             notebook_path: ../src/notebooks/04a_silver_time_series.py
+            base_parameters:
+              levels: ${var.silver_levels}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 5400
@@ -68,6 +74,8 @@ resources:
             - task_key: silver_time_series
           notebook_task:
             notebook_path: ../src/notebooks/05b_silver_features.py
+            base_parameters:
+              demo_region: ${var.demo_region}
           max_retries: 0
           disable_auto_optimization: true
           timeout_seconds: 3600

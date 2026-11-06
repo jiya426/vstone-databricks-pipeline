@@ -28,3 +28,9 @@ tricky = ["ZHVIPerSqft_AllHomes", "MedianRentalPrice_MultiFamilyResidence5PlusUn
 for name in tricky:
     result = to_snake_case(name)          # <- set the breakpoint on this line, then "Debug cell"
     print(f"{name!r:55} -> {result}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## What this notebook achieved
+# MAGIC - Demonstrated the built-in notebook debugger: breakpoint, step into, Variables pane and debug console on the header UDF.
