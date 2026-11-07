@@ -6,6 +6,7 @@ Tables (names from conf/vstone_config.json -> gold.tables)
   dim_*_current                           current version of each key; PRIMARY KEY
   fact_housing_metric_monthly             region x metric x month; FOREIGN KEYs to the 3 current dimensions
   agg_top10_regions_by_home_value, agg_monthly_market_trend, agg_state_sales_summary
+  agg_market_churn, agg_market_churn_summary  (Day 7: churn-style metric)
 
 Code parameterization: a pipeline has no widgets - values come from the `configuration` block in
 resources/pipeline_gold_dlt.yml (vstone.catalog, vstone.silver_schema, vstone.gold_schema, vstone.framework_path).
@@ -27,8 +28,9 @@ if _src is None:
     raise ImportError(f"vstone_framework not found; tried {_candidates}. Check vstone.framework_path in the pipeline config.")
 sys.path.insert(0, os.path.abspath(_src))
 from vstone_framework.config import load_config  # noqa: E402
-from vstone_framework.gold import (current_rows, dim_date_snapshot, dim_metric_snapshot,  # noqa: E402
-                                   dim_region_snapshot, fact_frame, market_trend, state_sales, top_regions)
+from vstone_framework.gold import (churn_summary, current_rows, dim_date_snapshot, dim_metric_snapshot,  # noqa: E402
+                                   dim_region_snapshot, fact_frame, market_churn, market_trend, state_sales,
+                                   top_regions)
 from vstone_framework.gold_schema import (DIM_DATE, DIM_METRIC, DIM_REGION, KEYS, TABLE_COMMENTS,  # noqa: E402
                                           dlt_schema)
 
@@ -109,7 +111,8 @@ def fact_housing_metric_monthly():
            table_properties=PROPS)
 def agg_top_regions():
     return top_regions(spark.read.table(T["fact"]), spark.read.table(T["dim_region_current"]),
-                       g["home_value_metric"], g["top_levels"], int(g["top_n"]), T["fact"], batch_id)
+                       g["home_value_metric"], g["top_levels"], int(g["top_n"]), T["fact"], batch_id,
+                       float(g["min_month_coverage"]))
 
 
 @dlt.table(name=T["agg_market_trend"], comment=TABLE_COMMENTS["agg_market_trend"], schema=schema("agg_market_trend"),
@@ -124,3 +127,18 @@ def agg_market_trend():
 def agg_state_sales():
     return state_sales(spark.read.table(T["fact"]), spark.read.table(T["dim_region_current"]),
                        g["sales_metrics"], g["sales_level"], T["fact"], batch_id)
+
+
+# ------------------------------------------------------------------ 6. churn-style metric (Day 7)
+@dlt.table(name=T["agg_churn"], comment=TABLE_COMMENTS["agg_churn"], schema=schema("agg_churn"), table_properties=PROPS)
+def agg_market_churn():
+    c = g["churn"]
+    return market_churn(spark.read.table(T["fact"]), spark.read.table(T["dim_region_current"]), c["metric"],
+                        int(c["inactive_months"]), int(c["cooling_months"]), T["fact"], batch_id,
+                        float(g["min_month_coverage"]))
+
+
+@dlt.table(name=T["agg_churn_summary"], comment=TABLE_COMMENTS["agg_churn_summary"],
+           schema=schema("agg_churn_summary"), table_properties=PROPS)
+def agg_market_churn_summary():
+    return churn_summary(spark.read.table(T["agg_churn"]), g["churn"]["unknown_state"], T["agg_churn"], batch_id)

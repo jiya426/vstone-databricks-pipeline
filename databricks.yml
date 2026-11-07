@@ -60,6 +60,15 @@ variables:
   demo_region:
     description: State used by the feature preview and the time-travel demo
     default: California
+  late_batch:
+    description: Name of the late-arriving batch (Day 7); a new name lands a new file
+    default: batch1
+  benchmark_runs:
+    description: How many times each benchmark query runs per layout
+    default: "3"
+  benchmark_layouts:
+    description: Layouts compared by the benchmark
+    default: plain,partition_zorder,liquid
 
 targets:
   dev:

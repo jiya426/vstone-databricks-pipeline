@@ -47,7 +47,7 @@ no null keys, headers exactly match `fields_per_level.json`.
 | A7 | Dates: string -> DATE, plus date_key yyyyMMdd. |
 | A8 | "Top customers / sales by region / monthly trend" -> top regions by home value, sales by state/metro, monthly market trend. |
 | A9 | "Churn" -> inactive regions (no data in last 6 months) and cooling markets (6 consecutive ZHVI declines). |
-| A10 | Late-arriving data is simulated with a held-back slice applied via MERGE. |
+| A10 | Late-arriving data is simulated from real Bronze rows (100 ZIP codes: Dec 2017 revised +1 %, Jan 2018 added), loaded incrementally with Auto Loader and applied to Silver with MERGE; flagged by `source = autoloader_late_csv`. See `docs/incremental_load_and_scd2.md`. |
 | A11 | RLS/CLS use workspace groups and a state-access mapping (no SCIM in Free Edition). |
 | A12 | All object names come from bundle variables (catalog `vstone`, prod `vstone_prod`). |
 | A13 | (Revised after trainer review) Bronze has 4 time-series tables, one per landed file, plus the 2 crosswalk tables. Silver splits the 4 tables back into the 6 levels by `RegionLevel`. |
