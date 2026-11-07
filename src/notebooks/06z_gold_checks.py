@@ -17,6 +17,7 @@
 # MAGIC | all_levels_reach_gold | all 6 geography levels are in the fact (PDF: every non-metadata file reaches Gold) |
 # MAGIC | top_n_per_level | the top-10 table has 1-10 rows for every configured level |
 # MAGIC | has_rows | the trend and sales aggregates are not empty |
+# MAGIC | churn: one_status_per_region, status_in_allowed_values, summary_adds_up | churn table and its summary agree |
 
 # COMMAND ----------
 
@@ -43,7 +44,7 @@ ctx = get_context(dbutils)
 # COMMAND ----------
 
 from vstone_framework.config import load_config
-from vstone_framework.gold import gold_checks
+from vstone_framework.gold import churn_checks, gold_checks
 from vstone_framework.gold_schema import KEYS
 from vstone_framework.ops import ensure_ops_tables, write_check_results
 from vstone_framework.quality import failed
@@ -63,6 +64,8 @@ silver_rows = spark.table(f"{ctx.silver}.{g['sources']['long']}").count()
 results = gold_checks(fact, silver_rows, current, history, pks, fks, spark.table(gt("agg_top_regions")),
                       int(g["top_n"]), g["top_levels"], spark.table(gt("agg_market_trend")),
                       spark.table(gt("agg_state_sales")), cfg["levels"], T["fact"], T["dim_region_current"])
+results += churn_checks(spark.table(gt("agg_churn")), spark.table(gt("agg_churn_summary")), g["churn"]["statuses"],
+                        T["agg_churn"])
 
 write_check_results(spark, ctx.ops, ctx.run_id, "gold", results)
 display(spark.createDataFrame([r.__dict__ for r in results]))

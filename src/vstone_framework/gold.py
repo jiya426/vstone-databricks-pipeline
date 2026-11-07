@@ -16,8 +16,8 @@ from typing import Dict, List, Mapping, Optional, Sequence
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
-from .gold_schema import (AGG_MARKET_TREND, AGG_STATE_SALES, AGG_TOP_REGIONS, DIM_DATE, DIM_METRIC, DIM_REGION, FACT,
-                          column_names)
+from .gold_schema import (AGG_CHURN, AGG_CHURN_SUMMARY, AGG_MARKET_TREND, AGG_STATE_SALES, AGG_TOP_REGIONS, DIM_DATE,
+                          DIM_METRIC, DIM_REGION, FACT, column_names)
 from .quality import CheckResult, _result
 
 GOLD_SOURCE = "gold_dlt"
@@ -81,14 +81,23 @@ def _date_from_key(col: str = "date_key"):
 
 
 # ------------------------------------------------------------------ aggregates
+def latest_complete_month(df: DataFrame, min_coverage: float) -> DataFrame:
+    """(level, date) of the latest month reported by >= min_coverage of the busiest month's regions, per level.
+    `df` needs level, date, region_key. Keeps a handful of early rows (late-arriving data) from defining 'latest'."""
+    per_month = df.groupBy("level", "date").agg(F.countDistinct("region_key").alias("n"))
+    busiest = per_month.groupBy("level").agg(F.max("n").alias("max_n"))
+    return (per_month.join(busiest, "level").filter(F.col("n") >= F.col("max_n") * min_coverage)
+                     .groupBy("level").agg(F.max("date").alias("date")))
+
+
 def top_regions(fact: DataFrame, regions: DataFrame, metric_key: str, levels: Sequence[str], top_n: int,
-                source_file: str, batch_id: str) -> DataFrame:
+                source_file: str, batch_id: str, min_coverage: float = 0.0) -> DataFrame:
     """Top N regions by home value in the latest month of each level, with the year-over-year change."""
     hv = (fact.filter(F.col("metric_key") == metric_key)
               .join(regions.select("region_key", "level", "region_name", "state_code", "region_type"), "region_key")
               .filter(F.col("level").isin(list(levels)) & (F.col("region_type") != "national"))
               .withColumn("date", _date_from_key()))
-    latest = hv.groupBy("level").agg(F.max("date").alias("date"))
+    latest = latest_complete_month(hv, min_coverage)
     now = hv.join(latest, ["level", "date"])
     prev = hv.select("region_key", F.col("date").alias("prev_date"), F.col("metric_value").alias("prev_value"))
     now = now.join(prev, (now.region_key == prev.region_key) &
@@ -134,6 +143,67 @@ def state_sales(fact: DataFrame, regions: DataFrame, metrics: Mapping[str, str],
            .filter(F.col("state_code").isNotNull())
            .transform(with_gold_audit(source_file, batch_id)))
     return _select(out, AGG_STATE_SALES)
+
+
+# ------------------------------------------------------------------ churn (Day 7)
+def market_churn(fact: DataFrame, regions: DataFrame, metric_key: str, inactive_months: int, cooling_months: int,
+                 source_file: str, batch_id: str, min_coverage: float = 0.0) -> DataFrame:
+    """Churn-style status per region (assumption A9):
+    inactive = the series stopped >= inactive_months before the latest month of the level,
+    cooling  = the value fell >= cooling_months months in a row up to the last month,
+    active   = otherwise."""
+    hv = (fact.filter(F.col("metric_key") == metric_key)
+              .select("region_key", "metric_value", _date_from_key().alias("date"))
+              .join(regions.filter(F.col("region_type") != "national")
+                    .select("region_key", "level", "region_name", "state_code"), "region_key"))
+    w = Window.partitionBy("region_key").orderBy("date")
+    hv = (hv.withColumn("prev_value", F.lag("metric_value").over(w))
+            .withColumn("prev_date", F.lag("date").over(w))
+            .withColumn("is_decline", F.coalesce((F.col("prev_date") == F.last_day(F.add_months("date", -1))) &
+                                                 (F.col("metric_value") < F.col("prev_value")), F.lit(False))))
+    # Every non-decline month starts a new group; the row number inside the group - 1 = declines in a row so far
+    hv = hv.withColumn("grp", F.sum((~F.col("is_decline")).cast("int")).over(
+        w.rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+    hv = hv.withColumn("streak", F.row_number().over(Window.partitionBy("region_key", "grp").orderBy("date")) - 1)
+    level_latest = latest_complete_month(hv, min_coverage).withColumnRenamed("date", "level_latest")
+    last = (hv.withColumn("rn", F.row_number().over(Window.partitionBy("region_key").orderBy(F.col("date").desc())))
+              .filter("rn = 1").join(level_latest, "level"))
+    months = F.greatest(F.lit(0), F.months_between("level_latest", "date").cast("int"))
+    out = (last.withColumn("last_data_date", F.col("date"))
+               .withColumn("months_since_last_data", months)
+               .withColumn("consecutive_monthly_declines", F.col("streak").cast("int"))
+               .withColumn("last_home_value_usd", F.col("metric_value"))
+               .withColumn("status", F.when(months >= inactive_months, "inactive")
+                                      .when(F.col("streak") >= cooling_months, "cooling").otherwise("active"))
+               .transform(with_gold_audit(source_file, batch_id)))
+    return _select(out, AGG_CHURN)
+
+
+def churn_summary(churn: DataFrame, unknown_state: str, source_file: str, batch_id: str) -> DataFrame:
+    """Churn rate per level and state."""
+    n = lambda status: F.sum((F.col("status") == status).cast("long"))
+    out = (churn.withColumn("state_code", F.coalesce("state_code", F.lit(unknown_state)))
+                .groupBy("level", "state_code")
+                .agg(F.count(F.lit(1)).alias("regions"), n("active").alias("active_regions"),
+                     n("cooling").alias("cooling_regions"), n("inactive").alias("inactive_regions"))
+                .withColumn("churn_rate_pct", F.round((F.col("cooling_regions") + F.col("inactive_regions"))
+                                                      / F.col("regions") * 100, 2))
+                .transform(with_gold_audit(source_file, batch_id)))
+    return _select(out, AGG_CHURN_SUMMARY)
+
+
+def churn_checks(churn: DataFrame, summary: DataFrame, statuses: Sequence[str], table: str) -> List[CheckResult]:
+    """Every region has one known status; the summary adds up to the region table."""
+    r: List[CheckResult] = []
+    dup = churn.groupBy("region_key").count().filter("count > 1").count()
+    r.append(_result(table, "one_status_per_region", 0, dup, dup == 0))
+    bad = churn.filter(~F.col("status").isin(list(statuses)) | F.col("status").isNull()).count()
+    r.append(_result(table, "status_in_allowed_values", 0, bad, bad == 0))
+    total, summed = churn.count(), summary.agg(F.sum("regions")).first()[0] or 0
+    r.append(_result(table, "summary_adds_up", total, summed, total == summed))
+    parts = summary.filter("regions != active_regions + cooling_regions + inactive_regions").count()
+    r.append(_result(table, "summary_status_split_adds_up", 0, parts, parts == 0))
+    return r
 
 
 # ------------------------------------------------------------------ glossary

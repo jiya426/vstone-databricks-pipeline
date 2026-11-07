@@ -24,7 +24,10 @@
     "levels": "all",
     "force_rechunk": "false",
     "demo_region": "California",
-    "demo_date": "2017-12-31"
+    "demo_date": "2017-12-31",
+    "late_batch": "batch1",
+    "benchmark_runs": "3",
+    "benchmark_layouts": "plain,partition_zorder,liquid"
   },
   "schemas": {
     "landing": "Landing zone: Volumes holding raw Zillow files, generated chunks and checkpoints",
@@ -36,7 +39,8 @@
   },
   "volumes": {
     "checkpoints": "checkpoints",
-    "raw_kaggle": "raw_kaggle"
+    "raw_kaggle": "raw_kaggle",
+    "late_arriving": "late_arriving"
   },
   "kaggle": {
     "dataset": "zillow/zecon",
@@ -409,7 +413,9 @@
       "fact": "fact_housing_metric_monthly",
       "agg_top_regions": "agg_top10_regions_by_home_value",
       "agg_market_trend": "agg_monthly_market_trend",
-      "agg_state_sales": "agg_state_sales_summary"
+      "agg_state_sales": "agg_state_sales_summary",
+      "agg_churn": "agg_market_churn",
+      "agg_churn_summary": "agg_market_churn_summary"
     },
     "glossary_table": "business_glossary",
     "declare_constraints": true,
@@ -444,6 +450,89 @@
       "city": "City, identified by Zillow's unique city id",
       "neighborhood": "Neighborhood, identified by Zillow's region id",
       "zip": "5-digit ZIP code"
+    },
+    "churn": {
+      "_comment": "Churn-style metric for housing (assumption A9): a region is 'inactive' when its home value series stopped at least inactive_months before the latest month of its level, 'cooling' when its home value fell cooling_months months in a row up to its last month, else 'active'.",
+      "metric": "zhvi_all_homes",
+      "inactive_months": 6,
+      "cooling_months": 6,
+      "unknown_state": "UNKNOWN",
+      "statuses": [
+        "active",
+        "cooling",
+        "inactive"
+      ]
+    },
+    "min_month_coverage": 0.5,
+    "_comment_min_month_coverage": "'Latest month' of a level = the latest month reported by at least this share of the level's regions, so a few early (late-arriving) rows do not become the ranking month."
+  },
+  "late_arriving": {
+    "_comment": "Day 7 incremental-load scenario. The Zillow extract ends in Dec 2017, so a late-arriving batch is SIMULATED from real rows: the latest month of region_count ZIP codes is revised by revision_pct and the next month arrives as new rows. Flagged by source = late_source in every layer.",
+    "volume": "late_arriving",
+    "file_prefix": "zillow_late_arriving",
+    "bronze_table": "zillow_ts_late_arriving",
+    "late_source": "autoloader_late_csv",
+    "level": "zip",
+    "source_chunk_no": 4,
+    "metric_code": "ZHVI_AllHomes",
+    "region_count": 100,
+    "revision_pct": 1.0,
+    "new_month_growth_pct": 0.5,
+    "scd2_demo": {
+      "_comment": "Crosswalk correction for the SCD Type 2 demo (simulated). MERGE changes one county name in Silver; the next Gold update closes the old dim_region version and opens a new one. A later full Silver rebuild restores the source name, which SCD2 records as a further version.",
+      "crosswalk": "county_crosswalk",
+      "key_column": "fips",
+      "key_value": "01003",
+      "column": "county_name",
+      "suffix": " County"
     }
+  },
+  "benchmark": {
+    "_comment": "Day 7 layout benchmark (PDF R33/R34): the Gold fact copied 3 ways, the same queries timed on each.",
+    "results_table": "performance_benchmark",
+    "layouts": {
+      "plain": {
+        "table": "bench_fact_plain",
+        "ddl": "",
+        "optimize": ""
+      },
+      "partition_zorder": {
+        "table": "bench_fact_partition_zorder",
+        "ddl": "PARTITIONED BY (metric_key)",
+        "optimize": "ZORDER BY (region_key, date_key)"
+      },
+      "liquid": {
+        "table": "bench_fact_liquid",
+        "ddl": "CLUSTER BY (metric_key, region_key, date_key)",
+        "optimize": ""
+      }
+    },
+    "queries": [
+      {
+        "id": "Q1",
+        "description": "One region, one metric, all months (point lookup)",
+        "sql": "SELECT date_key, metric_value FROM {table} WHERE region_key = 'zip:01001' AND metric_key = 'zhvi_all_homes'"
+      },
+      {
+        "id": "Q2",
+        "description": "One metric, one month, all regions",
+        "sql": "SELECT COUNT(*), AVG(metric_value) FROM {table} WHERE metric_key = 'zri_all_homes' AND date_key = 20171231"
+      },
+      {
+        "id": "Q3",
+        "description": "One metric, 3-year range, yearly average",
+        "sql": "SELECT CAST(date_key / 10000 AS INT) AS year, AVG(metric_value) FROM {table} WHERE metric_key = 'zhvi_all_homes' AND date_key BETWEEN 20150101 AND 20171231 GROUP BY 1"
+      },
+      {
+        "id": "Q4",
+        "description": "All metrics of the state level for one month",
+        "sql": "SELECT metric_key, COUNT(*) FROM {table} WHERE region_key LIKE 'state:%' AND date_key = 20171231 GROUP BY metric_key"
+      },
+      {
+        "id": "Q5",
+        "description": "Full scan aggregate (no filter - baseline)",
+        "sql": "SELECT metric_key, COUNT(*) FROM {table} GROUP BY metric_key"
+      }
+    ]
   }
 }

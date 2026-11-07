@@ -6,6 +6,7 @@ name: databricks-ci-cd
 # push to dev          : tests -> deploy to dev -> run Data Chunking -> Bronze ingestion -> Silver transform -> Gold
 # push to main         : tests -> deploy to prod
 # Run workflow (manual): tests -> deploy to dev -> run the job(s) picked in the form
+#                        (incremental_load and performance_benchmark run only when picked)
 on:
   pull_request:
     branches: [dev, main]
@@ -23,6 +24,8 @@ on:
           - bronze_ingestion
           - silver_transform
           - gold
+          - incremental_load
+          - performance_benchmark
           - none
 
 jobs:
@@ -84,6 +87,12 @@ jobs:
       - name: "Run job: Gold (star schema, aggregates, checks, business glossary)"
         if: env.JOBS == 'all' || env.JOBS == 'gold'
         run: databricks bundle run -t dev gold
+      - name: "Run job: Incremental load of late-arriving data (on demand only)"
+        if: env.JOBS == 'incremental_load'
+        run: databricks bundle run -t dev incremental_load
+      - name: "Run job: Layout performance benchmark (on demand only)"
+        if: env.JOBS == 'performance_benchmark'
+        run: databricks bundle run -t dev performance_benchmark
 
   deploy-prod:
     name: Deploy to prod

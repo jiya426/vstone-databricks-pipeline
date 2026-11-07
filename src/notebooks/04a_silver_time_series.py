@@ -70,6 +70,12 @@ from vstone_framework.uc import comment_table, load_level_fields, set_tags
 cfg, scfg = load_config(), load_config()["silver"]
 levels = ctx.list_param("levels", cfg["levels"])
 bronze_tables = [f"{ctx.bronze}.{s.table}" for s in time_series_sources()]
+# Day 7: late-arriving batches (if any were loaded) are part of the source; dedupe keeps the latest load per key,
+# so a full rebuild gives the same result as the incremental MERGE (07c)
+late_table = f"{ctx.bronze}.{cfg['late_arriving']['bronze_table']}"
+if spark.catalog.tableExists(late_table):
+    bronze_tables.append(late_table)
+print("Bronze sources:", bronze_tables)
 ensure_ops_tables(spark, ctx.ops)
 quarantine_table = f"{ctx.silver}.{scfg['quarantine_table']}"
 recon_table = f"{ctx.ops}.{scfg['reconciliation_table']}"

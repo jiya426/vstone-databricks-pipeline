@@ -37,14 +37,17 @@ def part_files(fs, folder: str) -> List[str]:
                   if f.name.startswith("part-") and not f.name.endswith(".crc"))
 
 
-def write_single_file(df: DataFrame, fmt: str, staging: str, final_file: str, fs) -> str:
-    """Write `df` as exactly one file named `final_file`; the folder of final_file holds only that file."""
+def write_single_file(df: DataFrame, fmt: str, staging: str, final_file: str, fs, clear_folder: bool = True) -> str:
+    """Write `df` as exactly one file named `final_file`.
+    clear_folder=True (chunk files): the folder then holds only that file.
+    clear_folder=False (late-arriving batches): earlier files in the folder are kept."""
     _writer(df, fmt, staging)
     parts = part_files(fs, staging)
     if len(parts) != 1:
         raise AssertionError(f"Expected 1 part file in {staging}, found {len(parts)}: {parts}")
     folder = final_file.rsplit("/", 1)[0]
-    fs.rm(folder, True)              # remove any older file so the folder holds exactly one file
+    if clear_folder:
+        fs.rm(folder, True)          # remove any older file so the folder holds exactly one file
     fs.mkdirs(folder)
     fs.cp(parts[0], final_file)
     fs.rm(staging, True)

@@ -84,3 +84,14 @@ def test_aggregates_answer_the_business_questions(gold):
     assert trend.count() > 0 and trend.filter("region_name IS NULL OR home_value_usd IS NULL").count() == 0
     al = gold["sales"].filter("state_code = 'AL' AND year = 2016").first()
     assert al is not None and al.homes_sold > 0 and al.months_reported == 12
+
+
+def test_churn_on_real_data(gold):
+    from vstone_framework.gold import churn_checks, churn_summary, market_churn
+    c = G["churn"]
+    churn = market_churn(gold["fact"], gold["regions"], c["metric"], int(c["inactive_months"]),
+                         int(c["cooling_months"]), "f", "t", float(G["min_month_coverage"]))
+    summary = churn_summary(churn, c["unknown_state"], "c", "t")
+    assert [r for r in churn_checks(churn, summary, c["statuses"], "churn") if r.status == "FAIL"] == []
+    assert set(r.status for r in churn.select("status").distinct().collect()) <= set(c["statuses"])
+    assert churn.filter("level = 'zip'").count() > 0

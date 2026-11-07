@@ -185,3 +185,32 @@ TABLE_COMMENTS: Dict[str, str] = {
     "agg_state_sales": "Gold aggregate: homes sold, sale price, home value and asking price per state and year",
     "glossary": "Governance: business glossary of every metric, feature, geography level and key used in Gold",
 }
+
+
+AGG_CHURN: List[Column] = [
+    ("region_key", "STRING", "Region business key"),
+    ("level", "STRING", "Geography level"),
+    ("region_name", "STRING", "Region display name"),
+    ("state_code", "STRING", "2-letter state code (when known)"),
+    ("last_data_date", "DATE", "Last month with a home value for the region"),
+    ("months_since_last_data", "INT", "Months between the region's last value and the latest month of its level"),
+    ("consecutive_monthly_declines", "INT", "Months in a row the home value fell, up to the last month"),
+    ("last_home_value_usd", "DECIMAL(18,4)", "Home value (ZHVI) in the last month, USD"),
+    ("status", "STRING", "active, cooling (falling for N months) or inactive (no data for N months)"),
+] + AUDIT
+
+AGG_CHURN_SUMMARY: List[Column] = [
+    ("level", "STRING", "Geography level"),
+    ("state_code", "STRING", "2-letter state code; UNKNOWN when the level has no state"),
+    ("regions", "BIGINT", "Regions with a home value series"),
+    ("active_regions", "BIGINT", "Regions with status active"),
+    ("cooling_regions", "BIGINT", "Regions with status cooling"),
+    ("inactive_regions", "BIGINT", "Regions with status inactive"),
+    ("churn_rate_pct", "DOUBLE", "(cooling + inactive) / regions x 100"),
+] + AUDIT
+
+KEYS["agg_churn"] = (AGG_CHURN, ("region_key",), {})
+KEYS["agg_churn_summary"] = (AGG_CHURN_SUMMARY, ("level", "state_code"), {})
+TABLE_COMMENTS["agg_churn"] = ("Gold aggregate: churn-style status of every region - active, cooling (home value falling "
+                               "for N months) or inactive (no data for N months)")
+TABLE_COMMENTS["agg_churn_summary"] = "Gold aggregate: churn rate per geography level and state"
