@@ -12,6 +12,8 @@ from typing import Callable, List, Optional
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
+from .config import load_config
+
 AUDIT_COLUMNS: List[str] = ["load_dt", "source", "source_file", "batch_id"]
 
 AUDIT_COLUMN_COMMENTS = {
@@ -21,13 +23,17 @@ AUDIT_COLUMN_COMMENTS = {
     "batch_id": "Audit: Databricks job run id that loaded the row ('manual' when run interactively)",
 }
 
-# Allowed values for `source` - one per ingestion path required by the PDF
-SOURCES = {
-    "copy_into_csv": "COPY INTO, chunk 1 CSV",
-    "dlt_csv": "Delta Live Tables, chunk 2 CSV",
-    "autoloader_json": "Auto Loader, chunk 3 JSON",
-    "pyspark_xml": "PySpark read/write, chunk 4 XML",
-}
+def _allowed_sources() -> dict:
+    """Allowed values for `source`, all from conf/vstone_config.json: one per chunk ingestion path,
+    the crosswalk load and the late-arriving (incremental) load. A new path is added in config only."""
+    cfg = load_config()
+    out = {c["source"]: f"{c['method']}, chunk {n} {c['format'].upper()}" for n, c in cfg["chunks"].items()}
+    out.setdefault(cfg["reference_load"]["source"], "COPY INTO, crosswalks from the raw Volume")
+    out[cfg["late_arriving"]["late_source"]] = "Auto Loader, late-arriving CSV batches (incremental load)"
+    return out
+
+
+SOURCES = _allowed_sources()
 
 
 def with_audit_columns(source: str, batch_id: str,
