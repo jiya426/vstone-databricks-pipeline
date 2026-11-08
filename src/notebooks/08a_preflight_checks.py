@@ -34,6 +34,11 @@ d = widget_defaults()
 # Job parameters
 dbutils.widgets.text("catalog", d["catalog"], "Catalog")
 dbutils.widgets.text("landing_schema", d["landing_schema"], "Landing schema")
+dbutils.widgets.text("bronze_schema", d["bronze_schema"], "Bronze schema")
+dbutils.widgets.text("silver_schema", d["silver_schema"], "Silver schema")
+dbutils.widgets.text("gold_schema", d["gold_schema"], "Gold schema")
+dbutils.widgets.text("governance_schema", d["governance_schema"], "Governance schema")
+dbutils.widgets.text("ops_schema", d["ops_schema"], "Ops schema")
 dbutils.widgets.text("raw_volume", d["raw_volume"], "Raw files Volume")
 dbutils.widgets.text("env", d["env"], "Environment")
 dbutils.widgets.text("run_id", d["run_id"], "Job run id")
@@ -51,9 +56,11 @@ checks = []
 validate_config(cfg)
 checks.append(("config", "valid", "PASS"))
 
-schemas = {r[0] for r in spark.sql(f"SHOW SCHEMAS IN {ctx.catalog}").collect()}
-for s in cfg["schemas"].values():
-    checks.append((f"schema {ctx.catalog}.{s}", "exists", "PASS" if s in schemas else "FAIL"))
+# Schema NAMES come from the job parameters (config -> "schemas" maps each layer to its description/comment)
+existing = {r[0] for r in spark.sql(f"SHOW SCHEMAS IN {ctx.catalog}").collect()}
+for s in (ctx.landing_schema, ctx.bronze_schema, ctx.silver_schema, ctx.gold_schema, ctx.governance_schema,
+          ctx.ops_schema):
+    checks.append((f"schema {ctx.catalog}.{s}", "exists", "PASS" if s in existing else "FAIL"))
 
 raw_files = [f.name for f in dbutils.fs.ls(ctx.raw_path) if not f.name.endswith("/")]
 expected = int(cfg["orchestration"]["expected_raw_files"])
