@@ -27,7 +27,8 @@
     "demo_date": "2017-12-31",
     "late_batch": "batch1",
     "benchmark_runs": "3",
-    "benchmark_layouts": "plain,partition_zorder,liquid"
+    "benchmark_layouts": "plain,partition_zorder,liquid",
+    "simulate_failure": "false"
   },
   "schemas": {
     "landing": "Landing zone: Volumes holding raw Zillow files, generated chunks and checkpoints",
@@ -534,5 +535,51 @@
         "sql": "SELECT metric_key, COUNT(*) FROM {table} GROUP BY metric_key"
       }
     ]
+  },
+  "security": {
+    "_comment": "Day 8-9 governance. Groups are created once in Settings -> Identity and access -> Groups (Free Edition has no SCIM/account console); everything else is generated from this block by 08b_security_setup.",
+    "admin_group": "vstone_admins",
+    "groups": {
+      "vstone_admins": "Data engineering team: every row, unmasked values",
+      "vstone_analysts_west": "Analysts for western states: their states only, values rounded",
+      "vstone_analysts_east": "Analysts for eastern states: their states only, values rounded"
+    },
+    "state_access": {
+      "vstone_analysts_west": [
+        "CA",
+        "OR",
+        "WA",
+        "NV",
+        "AZ"
+      ],
+      "vstone_analysts_east": [
+        "NY",
+        "NJ",
+        "MA",
+        "PA",
+        "FL"
+      ]
+    },
+    "access_table": "state_access_map",
+    "row_filter_function": "rf_state_access",
+    "mask_function": "mask_usd_value",
+    "mask_round_digits": -3,
+    "secured_source": "agg_market_trend",
+    "secured_table": "market_trend_secured",
+    "filter_column": "state_code",
+    "masked_columns": [
+      "home_value_usd",
+      "monthly_rent_usd",
+      "median_listing_price_usd"
+    ],
+    "dynamic_view_source": "agg_state_sales",
+    "dynamic_view": "v_state_sales_by_access",
+    "dynamic_view_hidden_columns": [
+      "avg_sale_price_usd"
+    ]
+  },
+  "orchestration": {
+    "_comment": "Master job: preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security, each a run_job_task.",
+    "expected_raw_files": 11
   }
 }
