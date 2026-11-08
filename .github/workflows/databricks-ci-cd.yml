@@ -3,10 +3,10 @@ name: databricks-ci-cd
 # All Databricks jobs and pipelines are triggered from here - never with "Run now" in the Databricks UI.
 #
 # PR into dev/main     : unit + integration tests on real-data samples, bundle validation (gate)
-# push to dev          : tests -> deploy to dev -> run Data Chunking -> Bronze ingestion -> Silver transform -> Gold
+# push to dev          : tests -> deploy to dev -> run the master pipeline
+#                        (preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security)
 # push to main         : tests -> deploy to prod
-# Run workflow (manual): tests -> deploy to dev -> run the job(s) picked in the form
-#                        (incremental_load and performance_benchmark run only when picked)
+# Run workflow (manual): tests -> deploy to dev -> run what is picked in the form
 on:
   pull_request:
     branches: [dev, main]
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       jobs_to_run:
-        description: Which dev job(s) to run after deploying
+        description: What to run in dev after deploying
         type: choice
         default: all
         options:
@@ -24,8 +24,10 @@ on:
           - bronze_ingestion
           - silver_transform
           - gold
+          - security
           - incremental_load
           - performance_benchmark
+          - failure_alert_test
           - none
 
 jobs:
@@ -36,11 +38,11 @@ jobs:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -50,7 +52,7 @@ jobs:
         run: pytest tests -v --junitxml=test-results.xml
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: test-results.xml
@@ -71,28 +73,38 @@ jobs:
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.jobs_to_run || 'all' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: databricks/setup-cli@main
       - name: Deploy bundle to dev
         run: databricks bundle deploy -t dev
-      - name: "Run job: Data Chunking (lands the 4 files; skipped files are not rewritten)"
-        if: env.JOBS == 'all' || env.JOBS == 'data_chunking'
+      - name: "Run job: master pipeline (preflight -> chunking -> bronze -> silver -> gold -> security)"
+        if: env.JOBS == 'all'
+        run: databricks bundle run -t dev master_pipeline
+      - name: "Run job: Data Chunking"
+        if: env.JOBS == 'data_chunking'
         run: databricks bundle run -t dev data_chunking
-      - name: "Run job: Bronze ingestion (4 files -> 4 Bronze tables + sanity checks)"
-        if: env.JOBS == 'all' || env.JOBS == 'bronze_ingestion'
+      - name: "Run job: Bronze ingestion"
+        if: env.JOBS == 'bronze_ingestion'
         run: databricks bundle run -t dev bronze_ingestion
-      - name: "Run job: Silver transform (cleaning, business rules, features + checks)"
-        if: env.JOBS == 'all' || env.JOBS == 'silver_transform'
+      - name: "Run job: Silver transform"
+        if: env.JOBS == 'silver_transform'
         run: databricks bundle run -t dev silver_transform
-      - name: "Run job: Gold (star schema, aggregates, checks, business glossary)"
-        if: env.JOBS == 'all' || env.JOBS == 'gold'
+      - name: "Run job: Gold"
+        if: env.JOBS == 'gold'
         run: databricks bundle run -t dev gold
-      - name: "Run job: Incremental load of late-arriving data (on demand only)"
+      - name: "Run job: Security (RLS, CLS, dynamic view, grants)"
+        if: env.JOBS == 'security'
+        run: databricks bundle run -t dev security
+      - name: "Run job: Incremental load of late-arriving data"
         if: env.JOBS == 'incremental_load'
         run: databricks bundle run -t dev incremental_load
-      - name: "Run job: Layout performance benchmark (on demand only)"
+      - name: "Run job: Layout performance benchmark"
         if: env.JOBS == 'performance_benchmark'
         run: databricks bundle run -t dev performance_benchmark
+      - name: "Failure-alert test: master pipeline fails on purpose (expected red; check the e-mail)"
+        if: env.JOBS == 'failure_alert_test'
+        continue-on-error: true
+        run: databricks bundle run -t dev master_pipeline --params simulate_failure=true
 
   deploy-prod:
     name: Deploy to prod
@@ -103,6 +115,6 @@ jobs:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: databricks/setup-cli@main
       - run: databricks bundle deploy -t prod

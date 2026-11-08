@@ -29,6 +29,10 @@ conf/vstone_config.json  ->  databricks.yml variables  ->  job parameters   (eve
 | vstone_bronze_csv_dlt (pipeline) | configuration: vstone.catalog, landing_schema, raw_volume, chunks_volume, `vstone.chunk_no`=2, env, framework_path | - |
 | vstone_silver_transform | catalog, landing_schema, raw_volume, bronze_schema, silver_schema, ops_schema, env, run_id | silver_time_series: `levels`; silver_features: `demo_region` |
 | vstone_gold | catalog, silver_schema, gold_schema, governance_schema, ops_schema, env, run_id | - |
+| vstone_security | catalog, gold_schema, governance_schema, env, run_id | - |
+| vstone_master_pipeline | catalog, landing_schema, raw_volume, env, run_id, `simulate_failure` | preflight reads `simulate_failure`; stages are `run_job_task`s |
+| vstone_incremental_load | catalog, schemas, raw_volume, env, run_id | late_bronze: `late_batch`; silver_features: `demo_region` |
+| vstone_performance_benchmark | catalog, gold_schema, ops_schema, env, run_id | `benchmark_runs`, `benchmark_layouts` |
 | vstone_gold_dlt (pipeline) | configuration: vstone.catalog, silver_schema, gold_schema, env, framework_path | - |
 
 `env` = `${bundle.target}` (dev/prod), `run_id` = `{{job.run_id}}`; every other value is a `${var.*}` bundle variable.
@@ -43,9 +47,9 @@ Jobs and pipelines are never started with "Run now" in the Databricks UI:
 | Event | GitHub Actions does |
 |---|---|
 | Pull request into dev/main | unit + integration tests on real-data samples, `bundle validate` |
-| Push (merge) to dev | tests -> `bundle deploy -t dev` -> `bundle run` Data Chunking -> Bronze ingestion -> Silver transform -> Gold |
+| Push (merge) to dev | tests -> `bundle deploy -t dev` -> `bundle run master_pipeline` (preflight -> Chunking -> Bronze -> Silver -> Gold -> Security) |
 | Push (merge) to main | tests -> `bundle deploy -t prod` |
-| Actions -> databricks-ci-cd -> **Run workflow** | tests -> deploy to dev -> run the job picked in the form (all / one job / none) |
+| Actions -> databricks-ci-cd -> **Run workflow** | tests -> deploy to dev -> run what is picked: all (master), one job, incremental_load, performance_benchmark, security, failure_alert_test (`--params simulate_failure=true`) or none |
 
 ## Guards (tests/unit/test_no_hardcoding.py)
 * No `/Volumes` paths, `catalog.schema` names, e-mail addresses, dates, raw file names, chunk file names or ops

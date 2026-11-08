@@ -69,6 +69,9 @@ variables:
   benchmark_layouts:
     description: Layouts compared by the benchmark
     default: plain,partition_zorder,liquid
+  simulate_failure:
+    description: "true = the master pipeline's preflight task fails on purpose (tests the failure e-mail)"
+    default: "false"
 
 targets:
   dev:
