@@ -22,6 +22,16 @@ resources:
           default: ${var.catalog}
         - name: landing_schema
           default: ${var.landing_schema}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+        - name: governance_schema
+          default: ${var.governance_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
         - name: raw_volume
           default: ${var.raw_volume}
         - name: env
