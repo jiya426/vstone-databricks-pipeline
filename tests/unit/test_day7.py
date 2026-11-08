@@ -124,3 +124,12 @@ def test_late_batches_keep_earlier_files(spark, tmp_path):
         write_single_file(df, "csv", str(folder / "_staging" / batch), str(folder / f"late_{batch}.csv"), LocalFs(),
                           clear_folder=False)
     assert sorted(os.listdir(folder)) == ["late_batch1.csv", "late_batch2.csv"]
+
+
+def test_late_arriving_source_is_an_allowed_audit_source(spark):
+    from vstone_framework.audit import SOURCES, with_audit_columns
+    from vstone_framework.config import load_config
+    src = load_config()["late_arriving"]["late_source"]
+    assert src in SOURCES
+    out = spark.createDataFrame([("x",)], "a string").transform(with_audit_columns(src, "run-1", F.lit("f.csv")))
+    assert out.first().source == src
