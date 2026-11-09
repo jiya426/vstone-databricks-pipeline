@@ -537,12 +537,47 @@
     ]
   },
   "security": {
-    "_comment": "Day 8-9 governance. Groups are created once in Settings -> Identity and access -> Groups (Free Edition has no SCIM/account console); everything else is generated from this block by 08b_security_setup.",
+    "_comment": "Day 8-9 tiered access model. Groups are created once in Settings -> Identity and access -> Groups (Free Edition has no SCIM/account console); everything else is generated from this block by 08b_security_setup. One policy decision point: fn_access_level() returns the caller's level; every row filter and column mask uses it.",
+    "levels": {
+      "admin": {
+        "rank": 1,
+        "row_scope": "all",
+        "description": "Data engineering: every row, exact values, lineage visible"
+      },
+      "analyst": {
+        "rank": 2,
+        "row_scope": "mapped_states",
+        "description": "Regional analysts: only their states, money rounded to 1,000, lineage redacted"
+      },
+      "viewer": {
+        "rank": 3,
+        "row_scope": "all",
+        "description": "Business viewers: all states at coarse precision - money rounded to 10,000, growth hidden, ZIP generalised"
+      },
+      "none": {
+        "rank": 9,
+        "row_scope": "none",
+        "description": "Anyone not in a Vstone group: no rows"
+      }
+    },
     "admin_group": "vstone_admins",
     "groups": {
-      "vstone_admins": "Data engineering team: every row, unmasked values",
-      "vstone_analysts_west": "Analysts for western states: their states only, values rounded",
-      "vstone_analysts_east": "Analysts for eastern states: their states only, values rounded"
+      "vstone_admins": {
+        "level": "admin",
+        "description": "Data engineering team"
+      },
+      "vstone_analysts_west": {
+        "level": "analyst",
+        "description": "Analysts for the western states"
+      },
+      "vstone_analysts_east": {
+        "level": "analyst",
+        "description": "Analysts for the eastern states"
+      },
+      "vstone_viewers": {
+        "level": "viewer",
+        "description": "Business viewers (management dashboards)"
+      }
     },
     "state_access": {
       "vstone_analysts_west": [
@@ -560,23 +595,144 @@
         "FL"
       ]
     },
+    "functions": {
+      "access_level": "fn_access_level",
+      "row_filter": "rf_state_access",
+      "mask_prefix": "mask_"
+    },
+    "mask_rules": {
+      "_comment": "SQL expression per level; `value` is the column value. A column mask returns the expression for the caller's level.",
+      "usd": {
+        "type": "DOUBLE",
+        "sensitivity": "confidential",
+        "description": "Money: exact for admins, rounded to 1,000 for analysts and 10,000 for viewers",
+        "admin": "value",
+        "analyst": "round(value, -3)",
+        "viewer": "round(value, -4)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
+      "pct": {
+        "type": "DOUBLE",
+        "sensitivity": "restricted",
+        "description": "Growth percentages: hidden from viewers",
+        "admin": "value",
+        "analyst": "value",
+        "viewer": "CAST(NULL AS DOUBLE)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
+      "zip": {
+        "type": "STRING",
+        "sensitivity": "quasi_identifier",
+        "description": "ZIP code: generalised to the 3-digit area for viewers",
+        "admin": "value",
+        "analyst": "value",
+        "viewer": "concat(substr(value, 1, 3), '**')",
+        "none": "CAST(NULL AS STRING)"
+      },
+      "internal": {
+        "type": "STRING",
+        "sensitivity": "internal",
+        "description": "Lineage (file paths, run ids): admins only",
+        "admin": "value",
+        "analyst": "'REDACTED'",
+        "viewer": "'REDACTED'",
+        "none": "CAST(NULL AS STRING)"
+      }
+    },
     "access_table": "state_access_map",
-    "row_filter_function": "rf_state_access",
-    "mask_function": "mask_usd_value",
-    "mask_round_digits": -3,
-    "secured_source": "agg_market_trend",
-    "secured_table": "market_trend_secured",
-    "filter_column": "state_code",
-    "masked_columns": [
-      "home_value_usd",
-      "monthly_rent_usd",
-      "median_listing_price_usd"
+    "policy_catalog_table": "access_policy_catalog",
+    "secured_tables": {
+      "market_trend_secured": {
+        "source": "agg_market_trend",
+        "row_filter": "state_code",
+        "description": "Monthly market trend per state with row-level security and tiered column masks",
+        "masks": {
+          "home_value_usd": "usd",
+          "monthly_rent_usd": "usd",
+          "median_listing_price_usd": "usd",
+          "zhvi_mom_pct": "pct",
+          "zhvi_yoy_pct": "pct",
+          "zri_yoy_pct": "pct",
+          "source_file": "internal",
+          "batch_id": "internal"
+        }
+      },
+      "zip_home_values_secured": {
+        "source": "zip_from_fact",
+        "row_filter": null,
+        "months": 24,
+        "description": "Last 24 months of typical home value per ZIP code with ZIP generalisation and money masks",
+        "masks": {
+          "zip_code": "zip",
+          "home_value_usd": "usd",
+          "source_file": "internal"
+        },
+        "level": "zip"
+      }
+    },
+    "dynamic_view": {
+      "name": "v_state_sales_by_access",
+      "source": "agg_state_sales",
+      "filter_column": "state_code",
+      "description": "Dynamic view: rows by access level; sale price hidden from non-admins; money masked by level",
+      "hidden_columns": [
+        "avg_sale_price_usd"
+      ],
+      "masked_columns": {
+        "avg_home_value_usd": "usd",
+        "avg_listing_price_usd": "usd"
+      }
+    },
+    "self_test": [
+      {
+        "rule": "usd",
+        "input": "532712.4",
+        "expected": {
+          "admin": "532712.4",
+          "analyst": "533000.0",
+          "viewer": "530000.0",
+          "none": null
+        }
+      },
+      {
+        "rule": "pct",
+        "input": "7.25",
+        "expected": {
+          "admin": "7.25",
+          "analyst": "7.25",
+          "viewer": null,
+          "none": null
+        }
+      },
+      {
+        "rule": "zip",
+        "input": "'02134'",
+        "expected": {
+          "admin": "02134",
+          "analyst": "02134",
+          "viewer": "021**",
+          "none": null
+        }
+      },
+      {
+        "rule": "internal",
+        "input": "'/Volumes/vstone/landing/chunks/chunk1_csv/f.csv'",
+        "expected": {
+          "admin": "/Volumes/vstone/landing/chunks/chunk1_csv/f.csv",
+          "analyst": "REDACTED",
+          "viewer": "REDACTED",
+          "none": null
+        }
+      }
     ],
-    "dynamic_view_source": "agg_state_sales",
-    "dynamic_view": "v_state_sales_by_access",
-    "dynamic_view_hidden_columns": [
-      "avg_sale_price_usd"
-    ]
+    "evidence": {
+      "_comment": "Columns shown in the evidence query of 08b",
+      "table": "market_trend_secured",
+      "money": "home_value_usd",
+      "pct": "zhvi_yoy_pct",
+      "lineage": "source_file",
+      "zip_table": "zip_home_values_secured"
+    }
   },
   "orchestration": {
     "_comment": "Master job: preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security, each a run_job_task.",

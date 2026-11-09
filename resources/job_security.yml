@@ -21,6 +21,8 @@ resources:
           default: ${var.gold_schema}
         - name: governance_schema
           default: ${var.governance_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
         - name: env
           default: ${bundle.target}
         - name: run_id
