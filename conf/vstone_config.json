@@ -611,6 +611,15 @@
         "viewer": "round(value, -4)",
         "none": "CAST(NULL AS DOUBLE)"
       },
+      "usd_small": {
+        "type": "DOUBLE",
+        "sensitivity": "confidential",
+        "description": "Small money amounts (monthly rent): exact for admins, rounded to 10 for analysts and 100 for viewers",
+        "admin": "value",
+        "analyst": "round(value, -1)",
+        "viewer": "round(value, -2)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
       "pct": {
         "type": "DOUBLE",
         "sensitivity": "restricted",
@@ -648,7 +657,7 @@
         "description": "Monthly market trend per state with row-level security and tiered column masks",
         "masks": {
           "home_value_usd": "usd",
-          "monthly_rent_usd": "usd",
+          "monthly_rent_usd": "usd_small",
           "median_listing_price_usd": "usd",
           "zhvi_mom_pct": "pct",
           "zhvi_yoy_pct": "pct",
@@ -691,6 +700,16 @@
           "admin": "532712.4",
           "analyst": "533000.0",
           "viewer": "530000.0",
+          "none": null
+        }
+      },
+      {
+        "rule": "usd_small",
+        "input": "1623.4",
+        "expected": {
+          "admin": "1623.4",
+          "analyst": "1620.0",
+          "viewer": "1600.0",
           "none": null
         }
       },
