@@ -1,7 +1,8 @@
 # Gold data model: design decisions and rationale
 
-Status: **target design**. Items 1 and 3 of section 8 are built; items 2, 4 and 5 are planned, reviewed against the Silver data and the current Gold build
-(`docs/gold_data_model.md` describes what is built today). Each decision below says what the build does now,
+Status: **target design**. Items 1 and 3 of section 8 are **live** (verified in Databricks on 2026-11-13: `dim_metric` has no history columns, 96 rows and 96 keys). Items 2, 4 and 5 are planned.
+
+Reviewed against the Silver data and the current Gold build (`docs/gold_data_model.md` describes what is built today). Each decision below says what the build does now,
 what the target is, and why.
 
 ## 1. Inputs that drive the design
@@ -94,9 +95,9 @@ BI tool can infer joins and so the data-quality check can confirm that no fact r
 
 ## 8. Changes from the current build, in order
 
-1. `dim_date`: generate as a static table (Type 0), removing the SCD2 snapshot flow. **Done on Day 1.**
+1. `dim_date`: generate as a static table (Type 0), removing the SCD2 snapshot flow. **Live (run #66).**
 2. `dim_region`: add `region_sk` per version. Point the fact at the version valid for the month.
-3. `dim_metric`: switch to Type 1. **Done on Day 1.** The business key `metric_key` stays; a `metric_sk` is added together with `region_sk` in step 2.
+3. `dim_metric`: switch to Type 1. **Live (run #66, 2026-11-13).** The business key `metric_key` stays; a `metric_sk` is added together with `region_sk` in step 2.
 4. Split the fact into `fact_market_value_monthly` and `fact_market_activity_monthly`.
 5. Re-point the dashboards: the market pages read the value fact, the sales pages read the activity fact.
 6. Re-run the Gold job, the benchmark (Day 7) and the security self-tests; re-verify each dashboard page.
