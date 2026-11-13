@@ -29,10 +29,10 @@ if _src is None:
     raise ImportError(f"vstone_framework not found; tried {_candidates}. Check vstone.framework_path in the pipeline config.")
 sys.path.insert(0, os.path.abspath(_src))
 from vstone_framework.config import load_config  # noqa: E402
-from vstone_framework.gold import (churn_summary, current_rows, dim_date_snapshot, dim_metric_snapshot,  # noqa: E402
-                                   dim_region_snapshot, fact_frame, market_churn, market_trend, plain_rows,
-                                   state_sales, top_regions)
-from vstone_framework.gold_schema import (DIM_DATE, DIM_METRIC, DIM_REGION, KEYS, TABLE_COMMENTS,  # noqa: E402
+from vstone_framework.gold import (attach_region_sk, churn_summary, current_region_rows, dim_date_snapshot,  # noqa: E402
+                                   dim_metric_snapshot, dim_region_snapshot, fact_frame, market_churn, market_trend,
+                                   plain_rows, state_sales, top_regions)
+from vstone_framework.gold_schema import (BUSINESS_KEYS, DIM_DATE, DIM_METRIC, KEYS, TABLE_COMMENTS,  # noqa: E402
                                           dlt_schema)
 
 # ---- pipeline parameters (configuration block) ----
@@ -70,7 +70,7 @@ auto_cdc_from_snapshot = getattr(dlt, "create_auto_cdc_from_snapshot_flow", None
 dlt.create_streaming_table(name=T["dim_region"], comment=TABLE_COMMENTS["dim_region"],
                            table_properties={**PROPS, "scd_type": "2"})
 auto_cdc_from_snapshot(target=T["dim_region"], source="stg_dim_region",
-                       keys=list(KEYS["dim_region_current"][1]), stored_as_scd_type=2)
+                       keys=list(BUSINESS_KEYS["dim_region"]), stored_as_scd_type=2)
 
 
 # ------------------------------------------------------------------ 3. Type 1: dim_metric (AUTO CDC, overwrite)
@@ -93,7 +93,7 @@ def dim_date_current():
 @dlt.table(name=T["dim_region_current"], comment=TABLE_COMMENTS["dim_region_current"],
            schema=schema("dim_region_current"), table_properties=PROPS)
 def dim_region_current():
-    return current_rows(spark.read.table(T["dim_region"]), DIM_REGION)
+    return current_region_rows(spark.read.table(T["dim_region"]))
 
 
 @dlt.table(name=T["dim_metric_current"], comment=TABLE_COMMENTS["dim_metric_current"],
@@ -110,11 +110,11 @@ def dim_metric_current():
 def fact_housing_metric_monthly():
     fact = fact_frame(spark.read.table(SILVER["long"]), SILVER["long"], batch_id)
     # Reading the dimensions makes the pipeline build them first (the FOREIGN KEYs need them). The semi-joins keep
-    # only rows with a dimension row; the Gold checks prove none were dropped (fact rows = Silver rows).
-    for dim_key, col in (("dim_region_current", "region_key"), ("dim_metric_current", "metric_key"),
-                         ("dim_date_current", "date_key")):
+    # only rows with a dimension row; the region version key comes from the current region rows; the Gold checks
+    # prove none were dropped (fact rows = Silver rows).
+    for dim_key, col in (("dim_metric_current", "metric_key"), ("dim_date_current", "date_key")):
         fact = fact.join(F.broadcast(spark.read.table(T[dim_key]).select(col)), col, "left_semi")
-    return fact
+    return attach_region_sk(fact, spark.read.table(T["dim_region_current"]))
 
 
 # ------------------------------------------------------------------ 5. aggregates
