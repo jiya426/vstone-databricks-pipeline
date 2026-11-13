@@ -6,8 +6,9 @@ from pyspark.sql import functions as F
 from vstone_framework.business_rules import metric_catalog
 from vstone_framework.config import load_config
 from vstone_framework.features import compute_features
-from vstone_framework.gold import (SCD_END, dim_date_snapshot, dim_metric_snapshot, dim_region_snapshot, fact_frame,
-                                   gold_checks, market_trend, state_sales, top_regions)
+from vstone_framework.gold import (SCD_END, SCD_START, attach_region_sk, current_region_rows, dim_date_snapshot,
+                                   dim_metric_snapshot, dim_region_snapshot, fact_frame, gold_checks, market_trend,
+                                   state_sales, top_regions)
 from vstone_framework.gold_schema import KEYS
 from vstone_framework.headers import to_snake_case
 from vstone_framework.regions import build_region_reference
@@ -46,8 +47,10 @@ def gold(spark):
             "dim_date": dim_date_snapshot(long.agg(F.min("date").alias("min_date"), F.max("date").alias("max_date")))}
     dims = {k: spark.createDataFrame(v.collect(), v.schema) for k, v in dims.items()}
     current = {T[f"{k}_current"]: v for k, v in dims.items()}                      # first load: every row current
-    history = {T["dim_region"]: dims["dim_region"].withColumn(SCD_END, F.lit(None).cast("timestamp"))}   # Type 2 only
-    fact = fact_frame(long, "silver.region_metric_monthly", "t")
+    history = {T["dim_region"]: dims["dim_region"].withColumn(SCD_START, F.current_timestamp())
+                                                   .withColumn(SCD_END, F.lit(None).cast("timestamp"))}   # Type 2 only
+    current[T["dim_region_current"]] = current_region_rows(history[T["dim_region"]])
+    fact = attach_region_sk(fact_frame(long, "silver.region_metric_monthly", "t"), current[T["dim_region_current"]])
     reg = current[T["dim_region_current"]]
     return {"long": long, "fact": fact, "current": current, "history": history, "regions": reg,
             "top": top_regions(fact, reg, G["home_value_metric"], G["top_levels"], int(G["top_n"]), "f", "t"),
