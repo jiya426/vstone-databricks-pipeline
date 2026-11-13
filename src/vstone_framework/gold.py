@@ -1,7 +1,9 @@
 """Gold layer transformations - pure DataFrame functions used by the Gold DLT pipeline and unit tested locally.
 
 Star schema
-    dim_date / dim_region / dim_metric             SCD Type 2 history (AUTO CDC from a snapshot of Silver)
+    dim_date                                       Type 0 (static calendar)
+    dim_region                                     Type 2 history (AUTO CDC from a snapshot of Silver)
+    dim_metric                                     Type 1 (AUTO CDC, overwrite; one row per metric)
     dim_*_current                                  one row per key, PRIMARY KEY  <- referenced by the fact
     fact_housing_metric_monthly                    grain: region x metric x month, FOREIGN KEYs to the 3 dims
 Aggregates (business questions from the PDF, mapped to housing - assumption A8)
@@ -62,6 +64,11 @@ def dim_region_snapshot(region_reference: DataFrame) -> DataFrame:
 
 def dim_metric_snapshot(metric_catalog: DataFrame) -> DataFrame:
     return _select(metric_catalog.withColumnRenamed("metric_name", "metric_key"), DIM_METRIC)
+
+
+def plain_rows(df: DataFrame, columns) -> DataFrame:
+    """Static (Type 0) or overwrite (Type 1) dimension: already one row per key, only the Gold schema is applied."""
+    return _select(df, columns)
 
 
 def current_rows(scd2: DataFrame, columns) -> DataFrame:

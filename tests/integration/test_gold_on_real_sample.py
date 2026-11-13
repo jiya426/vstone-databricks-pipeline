@@ -46,7 +46,7 @@ def gold(spark):
             "dim_date": dim_date_snapshot(long.agg(F.min("date").alias("min_date"), F.max("date").alias("max_date")))}
     dims = {k: spark.createDataFrame(v.collect(), v.schema) for k, v in dims.items()}
     current = {T[f"{k}_current"]: v for k, v in dims.items()}                      # first load: every row current
-    history = {T[k]: v.withColumn(SCD_END, F.lit(None).cast("timestamp")) for k, v in dims.items()}
+    history = {T["dim_region"]: dims["dim_region"].withColumn(SCD_END, F.lit(None).cast("timestamp"))}   # Type 2 only
     fact = fact_frame(long, "silver.region_metric_monthly", "t")
     reg = current[T["dim_region_current"]]
     return {"long": long, "fact": fact, "current": current, "history": history, "regions": reg,

@@ -173,9 +173,9 @@ def er_diagram_mermaid() -> str:
 
 
 TABLE_COMMENTS: Dict[str, str] = {
-    "dim_date": "Gold: date dimension (month-ends), SCD Type 2 history kept by AUTO CDC from the Silver calendar snapshot",
+    "dim_date": "Gold: date dimension (month-ends). Type 0: static calendar, never versioned",
     "dim_region": "Gold: region dimension (6 geography levels, names from the crosswalks), SCD Type 2 history via AUTO CDC",
-    "dim_metric": "Gold: metric dimension (96 Zillow metrics with unit and data-dictionary definition), SCD Type 2 history",
+    "dim_metric": "Gold: metric dimension (96 Zillow metrics with unit and data-dictionary definition). Type 1: overwritten in place, one row per metric",
     "dim_date_current": "Gold: current row of every date - primary key date_key, referenced by the fact",
     "dim_region_current": "Gold: current row of every region - primary key region_key, referenced by the fact",
     "dim_metric_current": "Gold: current row of every metric - primary key metric_key, referenced by the fact",
