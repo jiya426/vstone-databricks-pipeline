@@ -13,7 +13,7 @@
 # MAGIC | row_count_matches_silver | fact rows = rows of `silver.region_metric_monthly` (nothing lost, nothing added) |
 # MAGIC | primary_key_unique / not_null | fact (region, metric, month) and every current dimension key |
 # MAGIC | `<fk>`_has_dimension_row | every fact key exists in its dimension (referential integrity) |
-# MAGIC | scd2_one_current_version_per_key | every key of dim_date / dim_region / dim_metric has exactly 1 open version |
+# MAGIC | scd2_one_current_version_per_key | every key of dim_region (the only Type 2 dimension) has exactly 1 open version |
 # MAGIC | all_levels_reach_gold | all 6 geography levels are in the fact (PDF: every non-metadata file reaches Gold) |
 # MAGIC | top_n_per_level | the top-10 table has 1-10 rows for every configured level |
 # MAGIC | has_rows | the trend and sales aggregates are not empty |
@@ -56,7 +56,7 @@ ensure_ops_tables(spark, ctx.ops)
 
 fact = spark.table(gt("fact"))
 current = {T[k]: spark.table(gt(k)) for k in ("dim_date_current", "dim_region_current", "dim_metric_current")}
-history = {T[k]: spark.table(gt(k)) for k in ("dim_date", "dim_region", "dim_metric")}
+history = {T["dim_region"]: spark.table(gt("dim_region"))}   # only Type 2 keeps history (dim_date Type 0, dim_metric Type 1)
 pks = {T[k]: list(KEYS[k][1]) for k in ("fact", "dim_date_current", "dim_region_current", "dim_metric_current")}
 fks = {col: T[ref] for col, (ref, _) in KEYS["fact"][2].items()}
 silver_rows = spark.table(f"{ctx.silver}.{g['sources']['long']}").count()
@@ -92,5 +92,5 @@ display(spark.sql(f"""
 # MAGIC ## What this notebook achieved
 # MAGIC - Reconciled the fact table with Silver and proved every primary key is unique and not null.
 # MAGIC - Proved referential integrity: every region, metric and month in the fact exists in its dimension.
-# MAGIC - Proved the SCD Type 2 dimensions keep exactly one current version per key.
+# MAGIC - Proved dim_region (Type 2) keeps exactly one current version per key. dim_date (Type 0) and dim_metric (Type 1) keep no history.
 # MAGIC - Confirmed all 6 geography levels reach Gold and the aggregates are filled; results are in `ops.sanity_check_results`.

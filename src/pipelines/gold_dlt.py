@@ -1,9 +1,10 @@
 """Lakeflow Declarative Pipeline (DLT) - Gold layer: star schema + aggregates.
 
 Tables (names from conf/vstone_config.json -> gold.tables)
-  dim_date, dim_region, dim_metric        SCD Type 2: AUTO CDC from a snapshot of Silver keeps every version
-                                          (__START_AT / __END_AT added by the pipeline)
-  dim_*_current                           current version of each key; PRIMARY KEY
+  dim_date                                Type 0 (static): generated calendar, never versioned
+  dim_region                              Type 2: AUTO CDC from a snapshot keeps every version (__START_AT / __END_AT)
+  dim_metric                              Type 1: AUTO CDC from a snapshot overwrites in place (one row per metric)
+  dim_*_current                           one row per key, PRIMARY KEY
   fact_housing_metric_monthly             region x metric x month; FOREIGN KEYs to the 3 current dimensions
   agg_top10_regions_by_home_value, agg_monthly_market_trend, agg_state_sales_summary
   agg_market_churn, agg_market_churn_summary  (Day 7: churn-style metric)
@@ -29,8 +30,8 @@ if _src is None:
 sys.path.insert(0, os.path.abspath(_src))
 from vstone_framework.config import load_config  # noqa: E402
 from vstone_framework.gold import (churn_summary, current_rows, dim_date_snapshot, dim_metric_snapshot,  # noqa: E402
-                                   dim_region_snapshot, fact_frame, market_churn, market_trend, state_sales,
-                                   top_regions)
+                                   dim_region_snapshot, fact_frame, market_churn, market_trend, plain_rows,
+                                   state_sales, top_regions)
 from vstone_framework.gold_schema import (DIM_DATE, DIM_METRIC, DIM_REGION, KEYS, TABLE_COMMENTS,  # noqa: E402
                                           dlt_schema)
 
@@ -52,12 +53,6 @@ def schema(key):
 
 
 # ------------------------------------------------------------------ 1. snapshots of Silver (staging views)
-@dlt.view(name="stg_dim_date", comment="Calendar of month-ends covering every month in Silver")
-def stg_dim_date():
-    bounds = spark.read.table(SILVER["long"]).agg(F.min("date").alias("min_date"), F.max("date").alias("max_date"))
-    return dim_date_snapshot(bounds)
-
-
 @dlt.view(name="stg_dim_region", comment="Snapshot of silver.region_reference (business columns only)")
 def stg_dim_region():
     return dim_region_snapshot(spark.read.table(SILVER["region"]))
@@ -68,27 +63,43 @@ def stg_dim_metric():
     return dim_metric_snapshot(spark.read.table(SILVER["metric"]))
 
 
-# ------------------------------------------------------------------ 2. SCD Type 2 dimensions (AUTO CDC)
+# ------------------------------------------------------------------ 2. SCD Type 2: dim_region (AUTO CDC)
+# Regions change over time (a county moves to another metro, a name is corrected), so the history is kept.
 auto_cdc_from_snapshot = getattr(dlt, "create_auto_cdc_from_snapshot_flow", None) or dlt.apply_changes_from_snapshot
 
-for dim, staging, current_key in (("dim_date", "stg_dim_date", "dim_date_current"),
-                                  ("dim_region", "stg_dim_region", "dim_region_current"),
-                                  ("dim_metric", "stg_dim_metric", "dim_metric_current")):
-    dlt.create_streaming_table(name=T[dim], comment=TABLE_COMMENTS[dim],
-                               table_properties={**PROPS, "scd_type": "2"})
-    auto_cdc_from_snapshot(target=T[dim], source=staging, keys=list(KEYS[current_key][1]), stored_as_scd_type=2)
+dlt.create_streaming_table(name=T["dim_region"], comment=TABLE_COMMENTS["dim_region"],
+                           table_properties={**PROPS, "scd_type": "2"})
+auto_cdc_from_snapshot(target=T["dim_region"], source="stg_dim_region",
+                       keys=list(KEYS["dim_region_current"][1]), stored_as_scd_type=2)
 
 
-# ------------------------------------------------------------------ 3. current dimensions (PRIMARY KEYs)
-def declare_current(key, history_key, columns):
-    @dlt.table(name=T[key], comment=TABLE_COMMENTS[key], schema=schema(key), table_properties=PROPS)
-    def _current():
-        return current_rows(spark.read.table(T[history_key]), columns)
+# ------------------------------------------------------------------ 3. Type 1: dim_metric (AUTO CDC, overwrite)
+# A metric definition is corrected in place; no history is needed, so the target keeps one row per metric.
+dlt.create_streaming_table(name=T["dim_metric"], comment=TABLE_COMMENTS["dim_metric"],
+                           table_properties={**PROPS, "scd_type": "1"})
+auto_cdc_from_snapshot(target=T["dim_metric"], source="stg_dim_metric",
+                       keys=list(KEYS["dim_metric_current"][1]), stored_as_scd_type=1)
 
 
-declare_current("dim_date_current", "dim_date", DIM_DATE)
-declare_current("dim_region_current", "dim_region", DIM_REGION)
-declare_current("dim_metric_current", "dim_metric", DIM_METRIC)
+# ------------------------------------------------------------------ 4. dimension tables with PRIMARY KEYs
+# dim_date is static (Type 0): the calendar is generated from Silver's date range, never versioned.
+@dlt.table(name=T["dim_date_current"], comment=TABLE_COMMENTS["dim_date_current"],
+           schema=schema("dim_date_current"), table_properties={**PROPS, "scd_type": "0"})
+def dim_date_current():
+    bounds = spark.read.table(SILVER["long"]).agg(F.min("date").alias("min_date"), F.max("date").alias("max_date"))
+    return plain_rows(dim_date_snapshot(bounds), DIM_DATE)
+
+
+@dlt.table(name=T["dim_region_current"], comment=TABLE_COMMENTS["dim_region_current"],
+           schema=schema("dim_region_current"), table_properties=PROPS)
+def dim_region_current():
+    return current_rows(spark.read.table(T["dim_region"]), DIM_REGION)
+
+
+@dlt.table(name=T["dim_metric_current"], comment=TABLE_COMMENTS["dim_metric_current"],
+           schema=schema("dim_metric_current"), table_properties=PROPS)
+def dim_metric_current():
+    return plain_rows(spark.read.table(T["dim_metric"]), DIM_METRIC)
 
 
 # ------------------------------------------------------------------ 4. fact (FOREIGN KEYs)
