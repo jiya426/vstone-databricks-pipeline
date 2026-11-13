@@ -18,8 +18,8 @@ from typing import Dict, List, Mapping, Optional, Sequence
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
-from .gold_schema import (AGG_CHURN, AGG_CHURN_SUMMARY, AGG_MARKET_TREND, AGG_STATE_SALES, AGG_TOP_REGIONS, DIM_DATE,
-                          DIM_METRIC, DIM_REGION, FACT, column_names)
+from .gold_schema import (AGG_CHURN, AGG_CHURN_SUMMARY, AGG_MARKET_TREND, AGG_STATE_SALES, AGG_TOP_REGIONS, BUSINESS_KEYS,
+                          DIM_DATE, DIM_METRIC, DIM_REGION, DIM_REGION_SOURCE, FACT, FACT_SOURCE, column_names)
 from .quality import CheckResult, _result
 
 GOLD_SOURCE = "gold_dlt"
@@ -59,7 +59,7 @@ def dim_date_snapshot(bounds: DataFrame) -> DataFrame:
 
 
 def dim_region_snapshot(region_reference: DataFrame) -> DataFrame:
-    return _select(region_reference, DIM_REGION)
+    return _select(region_reference, DIM_REGION_SOURCE)
 
 
 def dim_metric_snapshot(metric_catalog: DataFrame) -> DataFrame:
@@ -71,16 +71,26 @@ def plain_rows(df: DataFrame, columns) -> DataFrame:
     return _select(df, columns)
 
 
-def current_rows(scd2: DataFrame, columns) -> DataFrame:
-    """The current version of every key of an SCD Type 2 table (open-ended __END_AT)."""
-    return _select(scd2.filter(F.col(SCD_END).isNull()), columns)
+def current_region_rows(scd2: DataFrame) -> DataFrame:
+    """The current version of every region (open-ended __END_AT). region_sk is a hash of region_key and the version
+    start, so every version has its own key; it is the primary key of dim_region_current."""
+    cur = (scd2.filter(F.col(SCD_END).isNull())
+               .withColumn("region_sk", F.xxhash64(F.col("region_key"), F.col(SCD_START))))
+    return _select(cur, DIM_REGION)
 
 
 # ------------------------------------------------------------------ fact
 def fact_frame(long: DataFrame, source_file: str, batch_id: str) -> DataFrame:
     """Silver long table -> fact at grain region x metric x month."""
     out = long.withColumnRenamed("metric_name", "metric_key").transform(with_gold_audit(source_file, batch_id))
-    return _select(out, FACT)
+    return _select(out, FACT_SOURCE)
+
+
+def attach_region_sk(fact: DataFrame, regions_current: DataFrame) -> DataFrame:
+    """Adds the region version key (region_sk) to each fact row. Inner join: a row without a region is dropped,
+    the same as the semi-join it replaces."""
+    keys = F.broadcast(regions_current.select("region_key", "region_sk"))
+    return _select(fact.join(keys, "region_key"), FACT)
 
 
 def _date_from_key(col: str = "date_key"):
@@ -224,8 +234,10 @@ def glossary_rows(metric_catalog: Sequence[Mapping], features: Mapping[str, str]
               f"{trend_table}.{name}", "Vstone feature rules (Silver)") for name, text in features.items()]
     rows += [(lvl, lvl, "Geography level", text, None, f"{region_table}.level", "Vstone configuration")
              for lvl, text in level_definitions.items()]
+    keys = {region_table: [c for c in DIM_REGION if c[0] in ("region_sk", "region_key")],
+            fact_table: [c for c in FACT if c[0] in ("region_sk", "region_key", "metric_key", "date_key")]}
     rows += [(n, n, "Key", c, None, f"{t}.{n}", "Vstone Gold data model")
-             for t, cols in ((region_table, DIM_REGION[:1]), (fact_table, FACT[2:3])) for n, _, c in cols]
+             for t, cols in keys.items() for n, _, c in cols]
     return rows
 
 
@@ -251,7 +263,7 @@ def gold_checks(fact: DataFrame, silver_long_rows: int, current: Mapping[str, Da
         orphans = fact.select(col).distinct().join(current[dim_name].select(col), col, "left_anti").count()
         r.append(_result(fact_name, f"{col}_has_dimension_row", 0, orphans, orphans == 0))
     for name, df in history.items():
-        key = pks[f"{name}_current"]
+        key = list(BUSINESS_KEYS[name])
         bad = (df.groupBy(*key).agg(F.sum(F.col(SCD_END).isNull().cast("int")).alias("open"))
                  .filter("open != 1").count())
         r.append(_result(name, "scd2_one_current_version_per_key", 0, bad, bad == 0))
