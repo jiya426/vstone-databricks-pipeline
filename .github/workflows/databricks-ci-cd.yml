@@ -29,6 +29,10 @@ on:
           - performance_benchmark
           - failure_alert_test
           - none
+      refresh_dim_metric:
+        description: One-off full refresh of dim_metric after the SCD type change
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -89,6 +93,9 @@ jobs:
       - name: "Run job: Silver transform"
         if: env.JOBS == 'silver_transform'
         run: databricks bundle run -t dev silver_transform
+      - name: "Full refresh dim_metric (one-off, after the SCD type change)"
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_dim_metric
+        run: databricks bundle run -t dev pipeline_gold_dlt --full-refresh dim_metric
       - name: "Run job: Gold"
         if: env.JOBS == 'gold'
         run: databricks bundle run -t dev gold
