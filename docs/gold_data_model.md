@@ -64,15 +64,17 @@ erDiagram
     dim_date_current ||--o{ fact_housing_metric_monthly : date_key
 ```
 
-## How the SCD Type 2 dimensions work
+## How the dimensions are built
 
 | Table | Type | Rows | Keys |
 |---|---|---|---|
-| `dim_date`, `dim_region`, `dim_metric` | SCD Type 2 streaming tables (AUTO CDC from a snapshot of Silver) | every version of every key; `__START_AT` / `__END_AT` mark validity | business key + `__START_AT` |
-| `dim_date_current`, `dim_region_current`, `dim_metric_current` | materialized views | the current version of each key (`__END_AT IS NULL`) | PRIMARY KEY on the business key |
+| `dim_date` | **Type 0** (static calendar, generated from Silver's date range) | one row per month-end, never versioned | `date_key` (yyyyMMdd) |
+| `dim_region` | **Type 2** (AUTO CDC from a snapshot of Silver) | every version of every region; `__START_AT` / `__END_AT` mark validity | business key `region_key` + `__START_AT` |
+| `dim_metric` | **Type 1** (AUTO CDC from a snapshot, overwrite) | one row per metric; no history columns | `metric_key` |
+| `dim_date_current`, `dim_region_current`, `dim_metric_current` | materialized views | one row per key (`dim_region`: the open version, `__END_AT IS NULL`) | PRIMARY KEY on the business key |
 | `fact_housing_metric_monthly` | materialized view, Liquid Clustering on metric_key, region_key, date_key | one row per region x metric x month | PRIMARY KEY (region_key, metric_key, date_key), 3 FOREIGN KEYs |
 
-Each pipeline update compares the new Silver snapshot with the previous one: a changed attribute (e.g. a region
+Only `dim_region` keeps history. Each pipeline update compares the new Silver snapshot with the previous one: a changed attribute (e.g. a region
 name corrected in a crosswalk) closes the old version (`__END_AT` set) and opens a new one. The fact references
 the current dimensions, so queries always join to one row per key.
 
