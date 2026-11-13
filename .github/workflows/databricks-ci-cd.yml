@@ -95,7 +95,7 @@ jobs:
         run: databricks bundle run -t dev silver_transform
       - name: "Full refresh dim_metric (one-off, after the SCD type change)"
         if: github.event_name == 'workflow_dispatch' && inputs.refresh_dim_metric
-        run: databricks bundle run -t dev pipeline_gold_dlt --full-refresh dim_metric
+        run: databricks bundle run -t dev gold_dlt --full-refresh dim_metric
       - name: "Run job: Gold"
         if: env.JOBS == 'gold'
         run: databricks bundle run -t dev gold
