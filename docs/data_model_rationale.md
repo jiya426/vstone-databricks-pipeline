@@ -1,6 +1,6 @@
 # Gold data model: design decisions and rationale
 
-Status: **target design**. Items 1 and 3 of section 8 are **live** (verified in Databricks on 2026-11-13: `dim_metric` has no history columns, 96 rows and 96 keys). Items 2, 4 and 5 are planned.
+Status: **target design**. Items 1, 2 and 3 of section 8 are **live** on `dev` (verified in Databricks on 2026-11-13: `dim_metric` has no history columns, 96 rows and 96 keys; `region_sk` is the primary key of `dim_region_current` and the fact points to it, pipeline run #75). Items 4 and 5 are planned, and the point-in-time join in item 2 is not yet built.
 
 Reviewed against the Silver data and the current Gold build (`docs/gold_data_model.md` describes what is built today). Each decision below says what the build does now,
 what the target is, and why.
@@ -42,7 +42,7 @@ that a measure column should have one meaning. The split is the target; it is li
 | Dimension | Change type | Surrogate key | Business key | Why |
 |---|---|---|---|---|
 | `dim_date` | **Type 0** (static, never changes) | `date_key` INT yyyyMMdd | the date | Calendar facts do not change. Versioning a calendar is wasted work, so this is not SCD2 |
-| `dim_region` | **Type 2** (history kept) | `region_sk` INT, one per version | `region_code` within `level` | A county's metro (CBSA) and a city's county change over time. Reporting "2015 sales by metro" must use the metro that existed in 2015 |
+| `dim_region` | **Type 2** (history kept) | `region_sk` BIGINT, one per version (hash of `region_key` and version start) | `region_code` within `level` | A county's metro (CBSA) and a city's county change over time. Reporting "2015 sales by metro" must use the metro that existed in 2015 |
 | `dim_metric` | **Type 1** (overwrite) | `metric_key` (business key; a `metric_sk` is deferred with `region_sk`) | `metric_key` | A metric's definition is corrected in place. History of a definition is not needed for analysis |
 
 **Why surrogate keys on the dimensions:**
@@ -51,13 +51,17 @@ that a measure column should have one meaning. The split is the target; it is li
 - Integer keys join faster and take less space than strings on a 10 M-row fact.
 - Business keys stay as attributes, so the source can still be traced.
 
-**Why not on the fact:** the fact has no natural surrogate key. Its primary key is the combination of the three
-dimension keys (region_sk, metric_sk, date_key), which keeps the grain explicit.
+**Why not on the fact:** the fact has no natural surrogate key. Its primary key is the combination of its
+dimension keys, which keeps the grain explicit. As built: (region_sk, metric_key, date_key). Target: (region_sk, metric_sk, date_key).
 
-**Current build vs target:** the build joins the fact to `*_current` tables by business key, so the fact always
-sees the latest region version. That makes the SCD2 history an audit trail, not something reports can use. The
-target adds `region_sk` and points each fact row at the region version valid for its month (point-in-time join).
-Until that change is made, this limitation is stated in the presentation.
+**Limit of the version dates:** the version start of each region is the pipeline run time, not the date the region
+changed. The source (Zillow crosswalk) has no change dates, so `region_sk` identifies a version but cannot answer
+"what did this county look like on date X" from the data.
+
+**Current build vs target:** the fact now carries `region_sk` (built), taken from `dim_region_current` at load, so
+every fact row points at the current version. The SCD2 history is kept in `dim_region` as an audit trail. The target
+is a point-in-time join, where each fact row points at the region version valid for its month. That is not built
+yet, and the limitation is stated in the presentation.
 
 ## 5. Slowly changing dimensions: which table, which type
 
@@ -85,10 +89,10 @@ volume the full recompute is cheaper to operate than the extra table properties.
 | Table | Primary key | Foreign keys | Relationship |
 |---|---|---|---|
 | `dim_date` | `date_key` | none | referenced by both facts, 1 to many |
-| `dim_region` | `region_sk` | none | referenced by both facts, 1 to many |
+| `dim_region` (as built: `dim_region_current`) | `region_sk` | none | referenced by the fact, 1 to many |
 | `dim_metric` | `metric_sk` | none | referenced by both facts, 1 to many |
-| `fact_market_value_monthly` | (region_sk, metric_sk, date_key) | region_sk, metric_sk, date_key | many to one to each dimension |
-| `fact_market_activity_monthly` | (region_sk, metric_sk, date_key) | region_sk, metric_sk, date_key | many to one to each dimension |
+| `fact_market_value_monthly` (target; as built: `fact_housing_metric_monthly`) | (region_sk, metric_sk, date_key) | region_sk, metric_sk, date_key | many to one to each dimension |
+| `fact_market_activity_monthly` (target) | (region_sk, metric_sk, date_key) | region_sk, metric_sk, date_key | many to one to each dimension |
 
 Primary keys are declared as constraints (`declare_constraints` in config). Foreign keys are declared so the
 BI tool can infer joins and so the data-quality check can confirm that no fact row points to a missing dimension.
@@ -96,7 +100,7 @@ BI tool can infer joins and so the data-quality check can confirm that no fact r
 ## 8. Changes from the current build, in order
 
 1. `dim_date`: generate as a static table (Type 0), removing the SCD2 snapshot flow. **Live (run #66).**
-2. `dim_region`: add `region_sk` per version. Point the fact at the version valid for the month.
+2. `dim_region`: add `region_sk` per version. **Live (run #75, 2026-11-13):** `region_sk` is the key of `dim_region_current`, the fact carries it. **Not yet:** pointing each fact row at the version valid for its month.
 3. `dim_metric`: switch to Type 1. **Live (run #66, 2026-11-13).** The business key `metric_key` stays; a `metric_sk` is added together with `region_sk` in step 2.
 4. Split the fact into `fact_market_value_monthly` and `fact_market_activity_monthly`.
 5. Re-point the dashboards: the market pages read the value fact, the sales pages read the activity fact.
@@ -120,7 +124,7 @@ they can never disagree with them. The secured views (`market_trend_secured`, `z
 | Star or snowflake? | Star. Flat dimensions, fewer joins, the data does not justify normalisation |
 | How many facts? | Two, split by unit family and grain (target); one in the current build |
 | Which dimension is SCD2? | `dim_region` only |
-| Surrogate keys where? | All dimensions (`region_sk`, `metric_sk`) and the date (`date_key`); not on the facts |
+| Surrogate keys where? | Region (`region_sk`, as built), metric (`metric_sk`, target) and the date (`date_key`); not on the facts |
 | Is CDC used? | Yes: Auto Loader and MERGE in Bronze/Silver; snapshot CDC for dimensions; full recompute for facts |
-| Primary keys | Dimension surrogates, and the fact's three dimension keys |
+| Primary keys | Dimension surrogates, and the fact's dimension keys (as built: `region_sk`, `metric_key`, `date_key` on the fact) |
 | Foreign keys | Fact to each dimension |
