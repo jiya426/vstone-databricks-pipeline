@@ -25,7 +25,7 @@
 # MAGIC | 5 Secured tables (filter + masks + sensitivity tags) | `gold.market_trend_secured`, `gold.zip_home_values_secured` |
 # MAGIC | 6 Dynamic view | `gold.v_state_sales_by_access` |
 # MAGIC | 7 Policy catalog (who sees what) | `governance.access_policy_catalog` |
-# MAGIC | 8 all four groups
+# MAGIC | 8 Grants | all four groups: admin full access, analyst and viewer least privilege |
 # MAGIC
 # MAGIC Everything comes from `conf/vstone_config.json -> security`. One-time prerequisite: the 4 groups exist
 # MAGIC (Settings -> Identity and access -> Groups) - see `docs/security_rls_cls.md`.
@@ -201,5 +201,5 @@ display(spark.sql(f"DESCRIBE TABLE EXTENDED {gold}.{ev['table']}"))
 # MAGIC ## What this notebook achieved
 # MAGIC - Built one policy decision point (`fn_access_level`) and 4 tiered mask rules, and **self-tested every rule for every level**.
 # MAGIC - Secured 2 tables with a row filter, column masks and sensitivity tags, and published a dynamic view.
-# MAGIC - Wrote the access matrix to `governance.access_policy_catalog` and granted least privilege to all four groups; row and column rules decide what each one sees
+# MAGIC - Wrote the access matrix to `governance.access_policy_catalog` and granted access to all four groups: admin full access, analyst and viewer least privilege.
 # MAGIC - Showed the caller's level and the masked data they see.
