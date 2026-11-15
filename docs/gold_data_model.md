@@ -20,7 +20,8 @@ erDiagram
         BOOLEAN is_year_end
     }
     dim_region_current {
-        STRING region_key PK
+        BIGINT region_sk PK
+        STRING region_key
         STRING level
         STRING region_code
         STRING region_name
@@ -48,7 +49,8 @@ erDiagram
         STRING definition
     }
     fact_housing_metric_monthly {
-        STRING region_key PK, FK
+        BIGINT region_sk PK, FK
+        STRING region_key
         STRING metric_key PK, FK
         INT date_key PK, FK
         DECIMAL metric_value
@@ -59,7 +61,7 @@ erDiagram
         STRING source_file
         STRING batch_id
     }
-    dim_region_current ||--o{ fact_housing_metric_monthly : region_key
+    dim_region_current ||--o{ fact_housing_metric_monthly : region_sk
     dim_metric_current ||--o{ fact_housing_metric_monthly : metric_key
     dim_date_current ||--o{ fact_housing_metric_monthly : date_key
 ```
@@ -71,8 +73,8 @@ erDiagram
 | `dim_date` | **Type 0** (static calendar, generated from Silver's date range) | one row per month-end, never versioned | `date_key` (yyyyMMdd) |
 | `dim_region` | **Type 2** (AUTO CDC from a snapshot of Silver) | every version of every region; `__START_AT` / `__END_AT` mark validity | business key `region_key` + `__START_AT` |
 | `dim_metric` | **Type 1** (AUTO CDC from a snapshot, overwrite) | one row per metric; no history columns | `metric_key` |
-| `dim_date_current`, `dim_region_current`, `dim_metric_current` | materialized views | one row per key (`dim_region`: the open version, `__END_AT IS NULL`) | PRIMARY KEY on the business key |
-| `fact_housing_metric_monthly` | materialized view, Liquid Clustering on metric_key, region_key, date_key | one row per region x metric x month | PRIMARY KEY (region_key, metric_key, date_key), 3 FOREIGN KEYs |
+| `dim_date_current`, `dim_region_current`, `dim_metric_current` | materialized views | one row per key (`dim_region`: the open version, `__END_AT IS NULL`) | PRIMARY KEY: `dim_region_current` on `region_sk`, the others on their business key |
+| `fact_housing_metric_monthly` | materialized view, Liquid Clustering on metric_key, region_key, date_key | one row per region x metric x month | PRIMARY KEY (region_sk, metric_key, date_key), 3 FOREIGN KEYs (region_sk, metric_key, date_key) |
 
 Only `dim_region` keeps history. Each pipeline update compares the new Silver snapshot with the previous one: a changed attribute (e.g. a region
 name corrected in a crosswalk) closes the old version (`__END_AT` set) and opens a new one. The fact references
@@ -101,11 +103,12 @@ Gold: current row of every date - primary key date_key, referenced by the fact
 
 ### `dim_region_current`
 
-Gold: current row of every region - primary key region_key, referenced by the fact
+Gold: current row of every region - primary key region_sk (one per version), referenced by the fact
 
 | Column | Type | Key | Description |
 |---|---|---|---|
-| `region_key` | STRING | PK | Business key '<level>:<region_code>' (primary key) |
+| `region_sk` | BIGINT | PK | Version key: hash of region_key and the version start (the pipeline run time) |
+| `region_key` | STRING |  | Business key '<level>:<region_code>' |
 | `level` | STRING |  | Geography level: state, metro, county, city, neighborhood, zip |
 | `region_code` | STRING |  | Standardised region code (county FIPS zero-padded to 5 digits) |
 | `region_name` | STRING |  | Display name, e.g. 'Baldwin, AL'; the code itself when no crosswalk exists |
@@ -143,7 +146,8 @@ Gold fact: one normalised value per region, metric and month (grain region x met
 
 | Column | Type | Key | Description |
 |---|---|---|---|
-| `region_key` | STRING | PK FK -> dim_region_current | Region (foreign key to dim_region_current) |
+| `region_sk` | BIGINT | PK FK -> dim_region_current | Region version (foreign key to dim_region_current) |
+| `region_key` | STRING |  | Region business key (kept for aggregates and joins by region) |
 | `metric_key` | STRING | PK FK -> dim_metric_current | Metric (foreign key to dim_metric_current) |
 | `date_key` | INT | PK FK -> dim_date_current | Month (foreign key to dim_date_current) |
 | `metric_value` | DECIMAL(18,4) |  | Normalised value in the metric's unit (USD for money) |
