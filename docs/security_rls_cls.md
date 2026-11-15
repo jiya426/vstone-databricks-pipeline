@@ -44,6 +44,12 @@ dynamic view) and a column-mask form `mask_<rule>(value)` that applies it for th
 | `gold.zip_home_values_secured` (last 24 months per ZIP) | - (ZIP has no state) | `zip_code` (`zip`), `home_value_usd` (`usd`), `source_file` (`internal`) |
 | `gold.v_state_sales_by_access` (dynamic view) | `WHERE rf_state_access(state_code)` | `avg_sale_price_usd` hidden, 2 USD columns masked |
 
+## Known limitation: analyst ZIP visibility
+Analysts (east and west) see **every ZIP code**, not only ZIPs in their states. The ZIP table
+(`gold.zip_home_values_secured`) has no state column, so the state row filter (`rf_state_access`) cannot apply to it.
+State-level tables are filtered correctly. Viewers see ZIPs masked to the 3-digit area (`940**`), so the ZIP exposure
+is limited for them. Fixing this needs a state key on the ZIP data (a ZIP-to-state crosswalk), which is not built.
+
 ## One-time setup (Free Edition: no SCIM / account console)
 1. **Groups** - Settings -> Identity and access -> Groups -> Add group: `vstone_admins`, `vstone_analysts_west`,
    `vstone_analysts_east`, `vstone_viewers`.
