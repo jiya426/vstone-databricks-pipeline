@@ -9,12 +9,12 @@
 # MAGIC **Goal:** every person sees exactly what their level allows - decided in **one place**
 # MAGIC (`governance.fn_access_level()`) and enforced by Unity Catalog on every query.
 # MAGIC
-# MAGIC | Level (groups) | Rows | Money (USD) | Growth % | ZIP code | Lineage |
-# MAGIC |---|---|---|---|---|---|
-# MAGIC | admin (`vstone_admins`) | all | exact | shown | full | shown |
-# MAGIC | analyst (`vstone_analysts_west/east`) | own states | rounded to 1,000 | shown | full | REDACTED |
-# MAGIC | viewer (`vstone_viewers`) | all states | rounded to 10,000 | hidden | `021**` | REDACTED |
-# MAGIC | none (anyone else) | none | - | - | - | - |
+# MAGIC | Level (groups) | Rows | Money (USD) | Rent | Growth % | ZIP code | Lineage |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | admin (`vstone_admins`) | all states | exact | exact | shown | full | shown |
+# MAGIC | analyst (`vstone_analysts_west/east`) | own states | rounded to 1,000 | rounded to 10 | shown | full (known limit: all ZIPs) | REDACTED |
+# MAGIC | viewer (`vstone_viewers`) | all states | rounded to 10,000 | rounded to 100 | hidden | first 3 digits, e.g. `940**` | REDACTED |
+# MAGIC | none (anyone else) | none | - | - | - | - | - |
 # MAGIC
 # MAGIC | Step | Objects |
 # MAGIC |---|---|
