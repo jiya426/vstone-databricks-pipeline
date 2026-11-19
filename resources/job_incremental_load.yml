@@ -1,0 +1,98 @@
+# Job: incremental load of late-arriving data (PDF Day 7). Run on demand from GitHub Actions ("Run workflow").
+#   late_bronze (land 1 new file + Auto Loader) -> silver_merge (MERGE INTO Silver + crosswalk correction)
+#   -> silver_conformed + silver_features -> gold_pipeline (SCD2 records the change) -> gold_checks -> evidence
+resources:
+  jobs:
+    incremental_load:
+      name: vstone_incremental_load
+      description: >
+        Lands a late-arriving batch, loads only the new file into Bronze with Auto Loader, MERGEs it into Silver
+        (update revised months, insert the new month), refreshes the conformed Silver tables and Gold
+        (SCD Type 2 dimensions record the change), then checks and shows the evidence in every layer.
+      max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
+      tags:
+        project: vstone
+        layer: incremental
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: landing_schema
+          default: ${var.landing_schema}
+        - name: raw_volume
+          default: ${var.raw_volume}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
+        - name: run_id
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: late_bronze
+          notebook_task:
+            notebook_path: ../src/notebooks/07b_late_arriving_bronze.py
+            base_parameters:
+              late_batch: ${var.late_batch}
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
+        - task_key: silver_merge
+          depends_on:
+            - task_key: late_bronze
+          notebook_task:
+            notebook_path: ../src/notebooks/07c_late_arriving_silver_merge.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
+        - task_key: silver_conformed
+          depends_on:
+            - task_key: silver_merge
+          notebook_task:
+            notebook_path: ../src/notebooks/05a_silver_conformed.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 5400
+        - task_key: silver_features
+          depends_on:
+            - task_key: silver_merge
+          notebook_task:
+            notebook_path: ../src/notebooks/05b_silver_features.py
+            base_parameters:
+              demo_region: ${var.demo_region}
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 5400
+        - task_key: gold_pipeline
+          depends_on:
+            - task_key: silver_conformed
+            - task_key: silver_features
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_dlt.id}
+            full_refresh: false
+          max_retries: 0
+          timeout_seconds: 7200
+        - task_key: gold_checks
+          depends_on:
+            - task_key: gold_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/06z_gold_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
+        - task_key: incremental_evidence
+          depends_on:
+            - task_key: gold_checks
+          notebook_task:
+            notebook_path: ../src/notebooks/07d_incremental_evidence.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800

@@ -1,0 +1,760 @@
+{
+  "_comment": "Central pipeline configuration. Static definitions only. Environment values (catalog, schemas, email, cut-off dates) are bundle variables passed to notebooks as job parameters; task-specific values (chunk_no, levels) are task parameters. The 'defaults' block is used only when a notebook runs interactively.",
+  "project": "vstone",
+  "source_system": "zillow",
+  "defaults": {
+    "_comment": "Defaults for interactive notebook runs only. Jobs override every value with bundle variables.",
+    "catalog": "vstone",
+    "landing_schema": "landing",
+    "bronze_schema": "bronze",
+    "silver_schema": "silver",
+    "gold_schema": "gold",
+    "governance_schema": "governance",
+    "ops_schema": "ops",
+    "raw_volume": "raw",
+    "chunks_volume": "chunks",
+    "run_id": "manual",
+    "chunk1_end_date": "2005-12-31",
+    "chunk2_end_date": "2012-12-31",
+    "chunk3_end_date": "2015-12-31",
+    "env": "dev",
+    "chunk_no": "1",
+    "chunk_nos": "1,2,3,4",
+    "include_reference": "true",
+    "levels": "all",
+    "force_rechunk": "false",
+    "demo_region": "California",
+    "demo_date": "2017-12-31",
+    "late_batch": "batch1",
+    "benchmark_runs": "3",
+    "benchmark_layouts": "plain,partition_zorder,liquid",
+    "simulate_failure": "false"
+  },
+  "schemas": {
+    "landing": "Landing zone: Volumes holding raw Zillow files, generated chunks and checkpoints",
+    "bronze": "Bronze layer: raw data as Delta, all columns STRING plus audit columns",
+    "silver": "Silver layer: typed, cleaned, deduplicated and standardised data",
+    "gold": "Gold layer: star schema (facts, SCD2 dimensions) and aggregates",
+    "governance": "Security objects: row filters, column masks, access mapping",
+    "ops": "Operational tables: run log, sanity checks, chunk manifest, profiling"
+  },
+  "volumes": {
+    "checkpoints": "checkpoints",
+    "raw_kaggle": "raw_kaggle",
+    "late_arriving": "late_arriving"
+  },
+  "kaggle": {
+    "dataset": "zillow/zecon",
+    "target_volume": "raw_kaggle",
+    "secret_scope": "vstone",
+    "username_key": "kaggle_username",
+    "token_key": "kaggle_key"
+  },
+  "levels": [
+    "state",
+    "metro",
+    "county",
+    "city",
+    "neighborhood",
+    "zip"
+  ],
+  "time_series_files": {
+    "State_time_series.csv": "state",
+    "Metro_time_series.csv": "metro",
+    "County_time_series.csv": "county",
+    "City_time_series.csv": "city",
+    "Neighborhood_time_series.csv": "neighborhood",
+    "Zip_time_series.csv": "zip"
+  },
+  "reference_files": {
+    "CountyCrossWalk_Zillow.csv": "county_crosswalk",
+    "cities_crosswalk.csv": "city_crosswalk"
+  },
+  "metadata_files": [
+    "DataDictionary.csv",
+    "all_available_metrics.json",
+    "fields_per_level.json"
+  ],
+  "metadata": {
+    "data_dictionary": "DataDictionary.csv",
+    "fields_per_level": "fields_per_level.json",
+    "available_metrics": "all_available_metrics.json"
+  },
+  "expected_raw_bytes": {
+    "City_time_series.csv": 689627012,
+    "Zip_time_series.csv": 782137407,
+    "Neighborhood_time_series.csv": 265790699,
+    "County_time_series.csv": 112778579,
+    "Metro_time_series.csv": 56232114,
+    "State_time_series.csv": 4742679,
+    "CountyCrossWalk_Zillow.csv": 232467,
+    "cities_crosswalk.csv": 1074309,
+    "DataDictionary.csv": 4668,
+    "all_available_metrics.json": 3409,
+    "fields_per_level.json": 17005
+  },
+  "expected_source_rows": {
+    "state": 13212,
+    "metro": 211182,
+    "county": 518791,
+    "city": 3762566,
+    "neighborhood": 1695038,
+    "zip": 4383885
+  },
+  "expected_malformed_neighborhood_rows": 302,
+  "chunks": {
+    "1": {
+      "folder": "chunk1_csv",
+      "file_name": "zillow_time_series_chunk1.csv",
+      "format": "csv",
+      "method": "copy_into",
+      "source": "copy_into_csv",
+      "table": "zillow_ts_chunk1_csv"
+    },
+    "2": {
+      "folder": "chunk2_csv",
+      "file_name": "zillow_time_series_chunk2.csv",
+      "format": "csv",
+      "method": "dlt",
+      "source": "dlt_csv",
+      "table": "zillow_ts_chunk2_csv_dlt"
+    },
+    "3": {
+      "folder": "chunk3_json",
+      "file_name": "zillow_time_series_chunk3.json",
+      "format": "json",
+      "method": "autoloader",
+      "source": "autoloader_json",
+      "table": "zillow_ts_chunk3_json"
+    },
+    "4": {
+      "folder": "chunk4_xml",
+      "file_name": "zillow_time_series_chunk4.xml",
+      "format": "xml",
+      "method": "pyspark_xml",
+      "source": "pyspark_xml",
+      "table": "zillow_ts_chunk4_xml"
+    }
+  },
+  "xml": {
+    "root_tag": "rows",
+    "row_tag": "row"
+  },
+  "rescued_data_column": "_rescued_data",
+  "time_series_key": [
+    "Date",
+    "RegionName",
+    "RegionLevel"
+  ],
+  "reference_keys": {
+    "county_crosswalk": [
+      "FIPS"
+    ],
+    "city_crosswalk": [
+      "Unique_City_ID"
+    ]
+  },
+  "reference_columns": {
+    "county_crosswalk": [
+      "CountyName",
+      "StateName",
+      "StateFIPS",
+      "CountyFIPS",
+      "MetroName_Zillow",
+      "CBSAName",
+      "CountyRegionID_Zillow",
+      "MetroRegionID_Zillow",
+      "FIPS",
+      "CBSACode"
+    ],
+    "city_crosswalk": [
+      "Unique_City_ID",
+      "City",
+      "County",
+      "State"
+    ]
+  },
+  "tags": {
+    "project": "vstone",
+    "source_system": "zillow"
+  },
+  "silver": {
+    "_comment": "Silver layer rules. region_patterns are full-match regexes validated against all 10,584,674 source rows (only the 302 corrupted Neighborhood rows fail).",
+    "time_series_suffix": "time_series",
+    "quarantine_table": "quarantine_records",
+    "column_map_table": "column_name_map",
+    "reconciliation_table": "silver_reconciliation",
+    "header_udf": "pandas",
+    "key_columns": [
+      "date",
+      "region_name"
+    ],
+    "region_patterns": {
+      "state": "^[A-Za-z]+$",
+      "metro": "^([0-9]{5}|United_States)$",
+      "county": "^[0-9]{4,5}$",
+      "city": "^[a-z0-9_]+$",
+      "neighborhood": "^[0-9]+$",
+      "zip": "^[0-9]{5}$"
+    },
+    "expected_quarantine_rows": {
+      "state": 0,
+      "metro": 0,
+      "county": 0,
+      "city": 0,
+      "neighborhood": 302,
+      "zip": 0
+    },
+    "conformed": {
+      "metric_catalog_table": "metric_catalog",
+      "long_table": "region_metric_monthly",
+      "region_table": "region_reference",
+      "features_table": "region_features_monthly",
+      "reconciliation_table": "silver_conformed_reconciliation",
+      "long_cluster_by": [
+        "level",
+        "metric_name",
+        "date_key"
+      ]
+    },
+    "reference_rules": {
+      "_comment": "Crosswalk cleaning rules (standardised names): zero-padding restores codes that lost leading zeros",
+      "county_crosswalk": {
+        "key": [
+          "fips"
+        ],
+        "pad": {
+          "fips": 5,
+          "state_fips": 2,
+          "county_fips": 3
+        },
+        "upper": []
+      },
+      "city_crosswalk": {
+        "key": [
+          "unique_city_id"
+        ],
+        "pad": {},
+        "upper": [
+          "state"
+        ]
+      }
+    }
+  },
+  "business_rules": {
+    "_comment": "Day 5 business rules. Units measured on the real data: every percentage is 0-100 except InventoryTierShare (0-1), which is scaled x100.",
+    "reporting_currency": "USD",
+    "source_currency": "USD",
+    "fx_to_reporting": {
+      "USD": 1.0
+    },
+    "unit_by_family": {
+      "ZHVI": "USD",
+      "ZRI": "USD_PER_MONTH",
+      "MedianListingPrice": "USD",
+      "MedianRentalPrice": "USD_PER_MONTH",
+      "MedianSoldPrice": "USD",
+      "MedianPriceCutDollar": "USD",
+      "ZHVIPerSqft": "USD_PER_SQFT",
+      "MedianListingPricePerSqft": "USD_PER_SQFT",
+      "ZriPerSqft": "USD_PER_SQFT_PER_MONTH",
+      "MedianRentalPricePerSqft": "USD_PER_SQFT_PER_MONTH",
+      "PctOfHomesDecreasingInValues": "PERCENT",
+      "PctOfHomesIncreasingInValues": "PERCENT",
+      "PctOfHomesSellingForGain": "PERCENT",
+      "PctOfHomesSellingForLoss": "PERCENT",
+      "PctOfListingsWithPriceReductionsSeasAdj": "PERCENT",
+      "PctOfListingsWithPriceReductions": "PERCENT",
+      "MedianPctOfPriceReduction": "PERCENT",
+      "TierShare": "PERCENT",
+      "InventoryRaw": "COUNT",
+      "InventorySeasonallyAdjusted": "COUNT",
+      "SalesRaw": "COUNT",
+      "SalesSeasonallyAdjusted": "COUNT",
+      "DaysOnZillow": "DAYS",
+      "AgeOfInventory": "DAYS",
+      "PriceToRentRatio": "RATIO"
+    },
+    "scale_by_family": {
+      "TierShare": 100.0
+    },
+    "currency_units": [
+      "USD",
+      "USD_PER_MONTH",
+      "USD_PER_SQFT",
+      "USD_PER_SQFT_PER_MONTH"
+    ],
+    "decimal_places": {
+      "USD": 2,
+      "USD_PER_MONTH": 2,
+      "USD_PER_SQFT": 4,
+      "USD_PER_SQFT_PER_MONTH": 4,
+      "PERCENT": 4,
+      "COUNT": 0,
+      "DAYS": 1,
+      "RATIO": 4
+    },
+    "state_codes": {
+      "Alabama": "AL",
+      "Alaska": "AK",
+      "Arizona": "AZ",
+      "Arkansas": "AR",
+      "California": "CA",
+      "Colorado": "CO",
+      "Connecticut": "CT",
+      "Delaware": "DE",
+      "District of Columbia": "DC",
+      "Florida": "FL",
+      "Georgia": "GA",
+      "Hawaii": "HI",
+      "Idaho": "ID",
+      "Illinois": "IL",
+      "Indiana": "IN",
+      "Iowa": "IA",
+      "Kansas": "KS",
+      "Kentucky": "KY",
+      "Louisiana": "LA",
+      "Maine": "ME",
+      "Maryland": "MD",
+      "Massachusetts": "MA",
+      "Michigan": "MI",
+      "Minnesota": "MN",
+      "Mississippi": "MS",
+      "Missouri": "MO",
+      "Montana": "MT",
+      "Nebraska": "NE",
+      "Nevada": "NV",
+      "New Hampshire": "NH",
+      "New Jersey": "NJ",
+      "New Mexico": "NM",
+      "New York": "NY",
+      "North Carolina": "NC",
+      "North Dakota": "ND",
+      "Ohio": "OH",
+      "Oklahoma": "OK",
+      "Oregon": "OR",
+      "Pennsylvania": "PA",
+      "Rhode Island": "RI",
+      "South Carolina": "SC",
+      "South Dakota": "SD",
+      "Tennessee": "TN",
+      "Texas": "TX",
+      "Utah": "UT",
+      "Vermont": "VT",
+      "Virginia": "VA",
+      "Washington": "WA",
+      "West Virginia": "WV",
+      "Wisconsin": "WI",
+      "Wyoming": "WY"
+    },
+    "national_regions": {
+      "state": "UnitedStates",
+      "metro": "United_States"
+    },
+    "region_code_padding": {
+      "county": 5
+    }
+  },
+  "ops_tables": {
+    "run_log": "pipeline_run_log",
+    "sanity_checks": "sanity_check_results",
+    "chunk_manifest": "chunk_manifest",
+    "profile_file_summary": "profile_file_summary",
+    "profile_column_stats": "profile_column_stats",
+    "profile_dq_findings": "profile_dq_findings"
+  },
+  "combined": {
+    "_comment": "Data Chunking combines the 6 time-series files into ONE dataset (union by column name, missing metrics NULL) and adds the level column, then splits it by date into exactly 4 files.",
+    "entity": "time_series",
+    "level_column": "RegionLevel",
+    "staging_folder": "_staging"
+  },
+  "reference_load": {
+    "_comment": "Crosswalks are not chunked: COPY INTO loads them straight from the raw Volume.",
+    "method": "copy_into",
+    "source": "copy_into_csv"
+  },
+  "expected_reference_rows": {
+    "county_crosswalk": 3144,
+    "city_crosswalk": 25341
+  },
+  "legacy_layout": {
+    "_comment": "Objects of the first design (each file split into 4 chunks = 24 chunk folders, 24 Bronze tables). Removed once by notebook 00d_cleanup_old_layout.",
+    "chunk_folders": [
+      "csv_initial",
+      "csv_incremental",
+      "json",
+      "xml"
+    ],
+    "bronze_table_suffixes": [
+      "ts_csv",
+      "ts_csv_dlt",
+      "ts_json",
+      "ts_xml"
+    ],
+    "checkpoint_folders": [
+      "autoloader_json"
+    ]
+  },
+  "gold": {
+    "_comment": "Gold star schema built by the Lakeflow (DLT) pipeline vstone_gold_dlt. SCD2 dimensions keep history (AUTO CDC from snapshot); *_current tables hold one row per key and carry the PRIMARY KEYs the fact's FOREIGN KEYs reference.",
+    "sources": {
+      "long": "region_metric_monthly",
+      "region": "region_reference",
+      "metric": "metric_catalog",
+      "features": "region_features_monthly"
+    },
+    "tables": {
+      "dim_date": "dim_date",
+      "dim_region": "dim_region",
+      "dim_metric": "dim_metric",
+      "dim_date_current": "dim_date_current",
+      "dim_region_current": "dim_region_current",
+      "dim_metric_current": "dim_metric_current",
+      "fact": "fact_housing_metric_monthly",
+      "agg_top_regions": "agg_top10_regions_by_home_value",
+      "agg_market_trend": "agg_monthly_market_trend",
+      "agg_state_sales": "agg_state_sales_summary",
+      "agg_churn": "agg_market_churn",
+      "agg_churn_summary": "agg_market_churn_summary"
+    },
+    "glossary_table": "business_glossary",
+    "declare_constraints": true,
+    "fact_cluster_by": [
+      "metric_key",
+      "region_key",
+      "date_key"
+    ],
+    "home_value_metric": "zhvi_all_homes",
+    "top_n": 10,
+    "top_levels": [
+      "state",
+      "metro",
+      "county",
+      "city",
+      "zip"
+    ],
+    "trend_levels": [
+      "state"
+    ],
+    "sales_metrics": {
+      "sales_count": "sale_counts",
+      "sale_price": "sale_prices",
+      "home_value": "zhvi_all_homes",
+      "listing_price": "median_listing_price_all_homes"
+    },
+    "sales_level": "state",
+    "level_definitions": {
+      "state": "US state (plus the national United States series)",
+      "metro": "Metropolitan statistical area (CBSA)",
+      "county": "US county, identified by its 5-digit FIPS code",
+      "city": "City, identified by Zillow's unique city id",
+      "neighborhood": "Neighborhood, identified by Zillow's region id",
+      "zip": "5-digit ZIP code"
+    },
+    "churn": {
+      "_comment": "Churn-style metric for housing (assumption A9): a region is 'inactive' when its home value series stopped at least inactive_months before the latest month of its level, 'cooling' when its home value fell cooling_months months in a row up to its last month, else 'active'.",
+      "metric": "zhvi_all_homes",
+      "inactive_months": 6,
+      "cooling_months": 6,
+      "unknown_state": "UNKNOWN",
+      "statuses": [
+        "active",
+        "cooling",
+        "inactive"
+      ]
+    },
+    "min_month_coverage": 0.5,
+    "_comment_min_month_coverage": "'Latest month' of a level = the latest month reported by at least this share of the level's regions, so a few early (late-arriving) rows do not become the ranking month."
+  },
+  "late_arriving": {
+    "_comment": "Day 7 incremental-load scenario. The Zillow extract ends in Dec 2017, so a late-arriving batch is SIMULATED from real rows: the latest month of region_count ZIP codes is revised by revision_pct and the next month arrives as new rows. Flagged by source = late_source in every layer.",
+    "volume": "late_arriving",
+    "file_prefix": "zillow_late_arriving",
+    "bronze_table": "zillow_ts_late_arriving",
+    "late_source": "autoloader_late_csv",
+    "level": "zip",
+    "source_chunk_no": 4,
+    "metric_code": "ZHVI_AllHomes",
+    "region_count": 100,
+    "revision_pct": 1.0,
+    "new_month_growth_pct": 0.5,
+    "scd2_demo": {
+      "_comment": "Crosswalk correction for the SCD Type 2 demo (simulated). MERGE changes one county name in Silver; the next Gold update closes the old dim_region version and opens a new one. A later full Silver rebuild restores the source name, which SCD2 records as a further version.",
+      "crosswalk": "county_crosswalk",
+      "key_column": "fips",
+      "key_value": "01003",
+      "column": "county_name",
+      "suffix": " County"
+    }
+  },
+  "benchmark": {
+    "_comment": "Day 7 layout benchmark (PDF R33/R34): the Gold fact copied 3 ways, the same queries timed on each.",
+    "results_table": "performance_benchmark",
+    "layouts": {
+      "plain": {
+        "table": "bench_fact_plain",
+        "ddl": "",
+        "optimize": ""
+      },
+      "partition_zorder": {
+        "table": "bench_fact_partition_zorder",
+        "ddl": "PARTITIONED BY (metric_key)",
+        "optimize": "ZORDER BY (region_key, date_key)"
+      },
+      "liquid": {
+        "table": "bench_fact_liquid",
+        "ddl": "CLUSTER BY (metric_key, region_key, date_key)",
+        "optimize": ""
+      }
+    },
+    "queries": [
+      {
+        "id": "Q1",
+        "description": "One region, one metric, all months (point lookup)",
+        "sql": "SELECT date_key, metric_value FROM {table} WHERE region_key = 'zip:01001' AND metric_key = 'zhvi_all_homes'"
+      },
+      {
+        "id": "Q2",
+        "description": "One metric, one month, all regions",
+        "sql": "SELECT COUNT(*), AVG(metric_value) FROM {table} WHERE metric_key = 'zri_all_homes' AND date_key = 20171231"
+      },
+      {
+        "id": "Q3",
+        "description": "One metric, 3-year range, yearly average",
+        "sql": "SELECT CAST(date_key / 10000 AS INT) AS year, AVG(metric_value) FROM {table} WHERE metric_key = 'zhvi_all_homes' AND date_key BETWEEN 20150101 AND 20171231 GROUP BY 1"
+      },
+      {
+        "id": "Q4",
+        "description": "All metrics of the state level for one month",
+        "sql": "SELECT metric_key, COUNT(*) FROM {table} WHERE region_key LIKE 'state:%' AND date_key = 20171231 GROUP BY metric_key"
+      },
+      {
+        "id": "Q5",
+        "description": "Full scan aggregate (no filter - baseline)",
+        "sql": "SELECT metric_key, COUNT(*) FROM {table} GROUP BY metric_key"
+      }
+    ]
+  },
+  "security": {
+    "_comment": "Day 8-9 tiered access model. Groups are created once in Settings -> Identity and access -> Groups (Free Edition has no SCIM/account console); everything else is generated from this block by 08b_security_setup. One policy decision point: fn_access_level() returns the caller's level; every row filter and column mask uses it.",
+    "levels": {
+      "admin": {
+        "rank": 1,
+        "row_scope": "all",
+        "description": "Data engineering: every row, exact values, lineage visible"
+      },
+      "analyst": {
+        "rank": 2,
+        "row_scope": "mapped_states",
+        "description": "Regional analysts: only their states, money rounded to 1,000, lineage redacted"
+      },
+      "viewer": {
+        "rank": 3,
+        "row_scope": "all",
+        "description": "Business viewers: all states at coarse precision - money rounded to 10,000, growth hidden, ZIP generalised"
+      },
+      "none": {
+        "rank": 9,
+        "row_scope": "none",
+        "description": "Anyone not in a Vstone group: no rows"
+      }
+    },
+    "admin_group": "vstone_admins",
+    "groups": {
+      "vstone_admins": {
+        "level": "admin",
+        "description": "Data engineering team"
+      },
+      "vstone_analysts_west": {
+        "level": "analyst",
+        "description": "Analysts for the western states"
+      },
+      "vstone_analysts_east": {
+        "level": "analyst",
+        "description": "Analysts for the eastern states"
+      },
+      "vstone_viewers": {
+        "level": "viewer",
+        "description": "Business viewers (management dashboards)"
+      }
+    },
+    "state_access": {
+      "vstone_analysts_west": [
+        "CA",
+        "OR",
+        "WA",
+        "NV",
+        "AZ"
+      ],
+      "vstone_analysts_east": [
+        "NY",
+        "NJ",
+        "MA",
+        "PA",
+        "FL"
+      ]
+    },
+    "functions": {
+      "access_level": "fn_access_level",
+      "row_filter": "rf_state_access",
+      "mask_prefix": "mask_"
+    },
+    "mask_rules": {
+      "_comment": "SQL expression per level; `value` is the column value. A column mask returns the expression for the caller's level.",
+      "usd": {
+        "type": "DOUBLE",
+        "sensitivity": "confidential",
+        "description": "Money: exact for admins, rounded to 1,000 for analysts and 10,000 for viewers",
+        "admin": "value",
+        "analyst": "round(value, -3)",
+        "viewer": "round(value, -4)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
+      "usd_small": {
+        "type": "DOUBLE",
+        "sensitivity": "confidential",
+        "description": "Small money amounts (monthly rent): exact for admins, rounded to 10 for analysts and 100 for viewers",
+        "admin": "value",
+        "analyst": "round(value, -1)",
+        "viewer": "round(value, -2)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
+      "pct": {
+        "type": "DOUBLE",
+        "sensitivity": "restricted",
+        "description": "Growth percentages: hidden from viewers",
+        "admin": "value",
+        "analyst": "value",
+        "viewer": "CAST(NULL AS DOUBLE)",
+        "none": "CAST(NULL AS DOUBLE)"
+      },
+      "zip": {
+        "type": "STRING",
+        "sensitivity": "quasi_identifier",
+        "description": "ZIP code: generalised to the 3-digit area for viewers",
+        "admin": "value",
+        "analyst": "value",
+        "viewer": "concat(substr(value, 1, 3), '**')",
+        "none": "CAST(NULL AS STRING)"
+      },
+      "internal": {
+        "type": "STRING",
+        "sensitivity": "internal",
+        "description": "Lineage (file paths, run ids): admins only",
+        "admin": "value",
+        "analyst": "'REDACTED'",
+        "viewer": "'REDACTED'",
+        "none": "CAST(NULL AS STRING)"
+      }
+    },
+    "access_table": "state_access_map",
+    "policy_catalog_table": "access_policy_catalog",
+    "secured_tables": {
+      "market_trend_secured": {
+        "source": "agg_market_trend",
+        "row_filter": "state_code",
+        "description": "Monthly market trend per state with row-level security and tiered column masks",
+        "masks": {
+          "home_value_usd": "usd",
+          "monthly_rent_usd": "usd_small",
+          "median_listing_price_usd": "usd",
+          "zhvi_mom_pct": "pct",
+          "zhvi_yoy_pct": "pct",
+          "zri_yoy_pct": "pct",
+          "source_file": "internal",
+          "batch_id": "internal"
+        }
+      },
+      "zip_home_values_secured": {
+        "source": "zip_from_fact",
+        "row_filter": null,
+        "months": 24,
+        "description": "Last 24 months of typical home value per ZIP code with ZIP generalisation and money masks",
+        "masks": {
+          "zip_code": "zip",
+          "home_value_usd": "usd",
+          "source_file": "internal"
+        },
+        "level": "zip"
+      }
+    },
+    "dynamic_view": {
+      "name": "v_state_sales_by_access",
+      "source": "agg_state_sales",
+      "filter_column": "state_code",
+      "description": "Dynamic view: rows by access level; sale price hidden from non-admins; money masked by level",
+      "hidden_columns": [
+        "avg_sale_price_usd"
+      ],
+      "masked_columns": {
+        "avg_home_value_usd": "usd",
+        "avg_listing_price_usd": "usd"
+      }
+    },
+    "self_test": [
+      {
+        "rule": "usd",
+        "input": "532712.4",
+        "expected": {
+          "admin": "532712.4",
+          "analyst": "533000.0",
+          "viewer": "530000.0",
+          "none": null
+        }
+      },
+      {
+        "rule": "usd_small",
+        "input": "1623.4",
+        "expected": {
+          "admin": "1623.4",
+          "analyst": "1620.0",
+          "viewer": "1600.0",
+          "none": null
+        }
+      },
+      {
+        "rule": "pct",
+        "input": "7.25",
+        "expected": {
+          "admin": "7.25",
+          "analyst": "7.25",
+          "viewer": null,
+          "none": null
+        }
+      },
+      {
+        "rule": "zip",
+        "input": "'02134'",
+        "expected": {
+          "admin": "02134",
+          "analyst": "02134",
+          "viewer": "021**",
+          "none": null
+        }
+      },
+      {
+        "rule": "internal",
+        "input": "'/Volumes/vstone/landing/chunks/chunk1_csv/f.csv'",
+        "expected": {
+          "admin": "/Volumes/vstone/landing/chunks/chunk1_csv/f.csv",
+          "analyst": "REDACTED",
+          "viewer": "REDACTED",
+          "none": null
+        }
+      }
+    ],
+    "evidence": {
+      "_comment": "Columns shown in the evidence query of 08b",
+      "table": "market_trend_secured",
+      "money": "home_value_usd",
+      "pct": "zhvi_yoy_pct",
+      "lineage": "source_file",
+      "zip_table": "zip_home_values_secured"
+    }
+  },
+  "orchestration": {
+    "_comment": "Master job: preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security, each a run_job_task.",
+    "expected_raw_files": 11
+  }
+}

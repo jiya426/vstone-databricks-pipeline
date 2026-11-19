@@ -1,0 +1,36 @@
+# Job: security (PDF Day 8-9) - access map, row filter, column masks, dynamic view and grants, from config.
+resources:
+  jobs:
+    security:
+      name: vstone_security
+      description: >
+        Applies row-level security (row filter on state_code), column-level security (masks on USD columns),
+        a dynamic view and least-privilege grants for the analyst groups. Rules come from conf/vstone_config.json.
+      max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
+      tags:
+        project: vstone
+        layer: governance
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: gold_schema
+          default: ${var.gold_schema}
+        - name: governance_schema
+          default: ${var.governance_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
+        - name: run_id
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: security_setup
+          notebook_task:
+            notebook_path: ../src/notebooks/08b_security_setup.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800

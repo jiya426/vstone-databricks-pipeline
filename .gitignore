@@ -1,0 +1,6 @@
+.databricks/
+__pycache__/
+.pytest_cache/
+*.pyc
+test-results.xml
+.venv/

@@ -1,0 +1,79 @@
+# Job: master pipeline (PDF Day 8-9 orchestration). One job runs the whole medallion flow in order;
+# each stage is its own job (run_job_task), so stages can still be run and monitored separately.
+#   preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security
+# No retries anywhere (PDF), failure e-mail on the master and on every stage job.
+resources:
+  jobs:
+    master_pipeline:
+      name: vstone_master_pipeline
+      description: >
+        End-to-end Vstone pipeline: preflight checks, then the Data Chunking, Bronze, Silver, Gold and Security
+        jobs in order. Triggered from GitHub Actions on every merge to dev.
+      max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
+      tags:
+        project: vstone
+        layer: orchestration
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: landing_schema
+          default: ${var.landing_schema}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+        - name: governance_schema
+          default: ${var.governance_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: raw_volume
+          default: ${var.raw_volume}
+        - name: env
+          default: ${bundle.target}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: simulate_failure
+          default: ${var.simulate_failure}
+      tasks:
+        - task_key: preflight
+          notebook_task:
+            notebook_path: ../src/notebooks/08a_preflight_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 900
+        - task_key: data_chunking
+          depends_on:
+            - task_key: preflight
+          run_job_task:
+            job_id: ${resources.jobs.data_chunking.id}
+          max_retries: 0
+        - task_key: bronze_ingestion
+          depends_on:
+            - task_key: data_chunking
+          run_job_task:
+            job_id: ${resources.jobs.bronze_ingestion.id}
+          max_retries: 0
+        - task_key: silver_transform
+          depends_on:
+            - task_key: bronze_ingestion
+          run_job_task:
+            job_id: ${resources.jobs.silver_transform.id}
+          max_retries: 0
+        - task_key: gold
+          depends_on:
+            - task_key: silver_transform
+          run_job_task:
+            job_id: ${resources.jobs.gold.id}
+          max_retries: 0
+        - task_key: security
+          depends_on:
+            - task_key: gold
+          run_job_task:
+            job_id: ${resources.jobs.security.id}
+          max_retries: 0

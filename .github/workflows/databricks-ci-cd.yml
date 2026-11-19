@@ -1,0 +1,127 @@
+name: databricks-ci-cd
+
+# All Databricks jobs and pipelines are triggered from here - never with "Run now" in the Databricks UI.
+#
+# PR into dev/main     : unit + integration tests on real-data samples, bundle validation (gate)
+# push to dev          : tests -> deploy to dev -> run the master pipeline
+#                        (preflight -> Data Chunking -> Bronze -> Silver -> Gold -> Security)
+# push to main         : tests -> deploy to prod
+# Run workflow (manual): tests -> deploy to dev -> run what is picked in the form
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+    inputs:
+      jobs_to_run:
+        description: What to run in dev after deploying
+        type: choice
+        default: all
+        options:
+          - all
+          - data_chunking
+          - bronze_ingestion
+          - silver_transform
+          - gold
+          - security
+          - incremental_load
+          - performance_benchmark
+          - failure_alert_test
+          - none
+      refresh_dim_metric:
+        description: One-off full refresh of dim_metric after the SCD type change
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    name: Unit tests and bundle validation
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run unit and integration tests
+        run: pytest tests -v --junitxml=test-results.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results
+          path: test-results.xml
+          if-no-files-found: ignore
+      - uses: databricks/setup-cli@main
+      - name: Validate bundle (dev)
+        run: databricks bundle validate -t dev
+
+  deploy-dev:
+    name: Deploy to dev and run the jobs
+    needs: test
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.jobs_to_run || 'all' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: databricks/setup-cli@main
+      - name: Deploy bundle to dev
+        run: databricks bundle deploy -t dev
+      - name: "Run job: master pipeline (preflight -> chunking -> bronze -> silver -> gold -> security)"
+        if: env.JOBS == 'all'
+        run: databricks bundle run -t dev master_pipeline
+      - name: "Run job: Data Chunking"
+        if: env.JOBS == 'data_chunking'
+        run: databricks bundle run -t dev data_chunking
+      - name: "Run job: Bronze ingestion"
+        if: env.JOBS == 'bronze_ingestion'
+        run: databricks bundle run -t dev bronze_ingestion
+      - name: "Run job: Silver transform"
+        if: env.JOBS == 'silver_transform'
+        run: databricks bundle run -t dev silver_transform
+      - name: "Full refresh dim_metric (one-off, after the SCD type change)"
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_dim_metric
+        run: databricks bundle run -t dev gold_dlt --full-refresh dim_metric
+      - name: "Run job: Gold"
+        if: env.JOBS == 'gold'
+        run: databricks bundle run -t dev gold
+      - name: "Run job: Security (RLS, CLS, dynamic view, grants)"
+        if: env.JOBS == 'security'
+        run: databricks bundle run -t dev security
+      - name: "Run job: Incremental load of late-arriving data"
+        if: env.JOBS == 'incremental_load'
+        run: databricks bundle run -t dev incremental_load
+      - name: "Run job: Layout performance benchmark"
+        if: env.JOBS == 'performance_benchmark'
+        run: databricks bundle run -t dev performance_benchmark
+      - name: "Failure-alert test: master pipeline fails on purpose (expected red; check the e-mail)"
+        if: env.JOBS == 'failure_alert_test'
+        continue-on-error: true
+        run: databricks bundle run -t dev master_pipeline --params simulate_failure=true
+
+  deploy-prod:
+    name: Deploy to prod
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle deploy -t prod

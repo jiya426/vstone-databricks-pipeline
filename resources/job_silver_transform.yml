@@ -1,0 +1,90 @@
+# Job: Silver transform (PDF Days 4-5).
+#   Day 4: silver_time_series + silver_reference (parallel) -> silver_sanity_checks
+#   Day 5: silver_conformed (business rules) + silver_features (parallel) -> silver_conformed_checks
+# Job parameters -> every task; task parameters: levels (silver_time_series), demo_region (silver_features).
+# Triggered only from GitHub Actions.
+resources:
+  jobs:
+    silver_transform:
+      name: vstone_silver_transform
+      description: >
+        Bronze -> Silver: each level's rows from the 4 Bronze tables, quality rules with quarantine,
+        typing, null handling, deduplication, snake_case headers via pandas UDF, reconciliation and checks;
+        then business rules (units, currency normalisation, date keys, region standardisation), long table and features.
+      max_concurrent_runs: 1
+      performance_target: PERFORMANCE_OPTIMIZED
+      tags:
+        project: vstone
+        layer: silver
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: landing_schema
+          default: ${var.landing_schema}
+        - name: raw_volume
+          default: ${var.raw_volume}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: ops_schema
+          default: ${var.ops_schema}
+        - name: env
+          default: ${bundle.target}
+        - name: run_id
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: silver_time_series
+          notebook_task:
+            notebook_path: ../src/notebooks/04a_silver_time_series.py
+            base_parameters:
+              levels: ${var.silver_levels}
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 5400
+        - task_key: silver_reference
+          notebook_task:
+            notebook_path: ../src/notebooks/04b_silver_reference.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
+        - task_key: silver_sanity_checks
+          depends_on:
+            - task_key: silver_time_series
+            - task_key: silver_reference
+          notebook_task:
+            notebook_path: ../src/notebooks/04z_silver_sanity_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 1800
+        - task_key: silver_conformed
+          depends_on:
+            - task_key: silver_time_series
+            - task_key: silver_reference
+          notebook_task:
+            notebook_path: ../src/notebooks/05a_silver_conformed.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 7200
+        - task_key: silver_features
+          depends_on:
+            - task_key: silver_time_series
+          notebook_task:
+            notebook_path: ../src/notebooks/05b_silver_features.py
+            base_parameters:
+              demo_region: ${var.demo_region}
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
+        - task_key: silver_conformed_checks
+          depends_on:
+            - task_key: silver_conformed
+            - task_key: silver_features
+          notebook_task:
+            notebook_path: ../src/notebooks/05z_silver_conformed_checks.py
+          max_retries: 0
+          disable_auto_optimization: true
+          timeout_seconds: 3600
